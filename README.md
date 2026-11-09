@@ -129,7 +129,7 @@ scripts/setup_venv.ps1         Windows GPU venv (기존 goodreads-ikgr venv 재�
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\setup_venv.ps1     # 기존 %USERPROFILE%\.venvs\goodreads-ikgr 재사용
-copy .env.example .env                                              # LUXIA_API_KEY 입력
+copy .env.example .env                                              # LUXIA API 키 입력 (여러 개 가능, 아래 참고)
 ```
 
 ```bash
@@ -144,10 +144,34 @@ B/C는 LLM 캐시에 없는 프로필만 호출하고, B/C/D는 입력 해시가
 E는 끝난 spec×seed를 유지한다. `eval_slices.py`·`model_ikgr.py`·`corona_retriever.py`나 설정을 바꾸면
 끝난 결과도 다시 학습한다(의도된 안전장치).
 
+### Luxia API 키 여러 개 (자동 교체)
+
+`.env`에 키를 여러 개 넣으면 앞에서부터 쓰다가, 현재 키의 크레딧/토큰이 떨어지면 **다음 키로 자동 교체**한다
+(`ikgr_core/key_pool.py`). 순서는 `LUXIA_API_KEY` → `LUXIA_API_KEY_1`, `_2`, … → `LUXIA_API_KEYS=k1,k2` (섞어 써도 됨).
+
+```ini
+LUXIA_API_KEY=첫번째키
+LUXIA_API_KEY_2=두번째키
+LUXIA_API_KEY_3=세번째키
+```
+
+| 응답 | 판단 | 동작 |
+|---|---|---|
+| HTTP 401 / 402 / 403 | 키 무효·미결제·차단 | 즉시 다음 키로 같은 요청 재시도 |
+| 본문에 소진 문구(`insufficient`, `quota`, `credit`, `balance`, `크레딧`, `잔액`, `충전`, `부족` …) — HTTP 200 오류 JSON 포함 | 크레딧/토큰 소진 | 즉시 다음 키 |
+| 일반 HTTP 429 (본문에 소진 문구 없음) | rate limit | 같은 키로 기존 backoff 재시도 |
+| 한 키가 성공 없이 429만 `IKGR_LLM_ROTATE_AFTER_429_SEC`초(기본 600) 이상 | 사실상 사용 불가 | 다음 키 (0이면 끔) |
+| 모든 키 소진 | — | step1/step2가 캐시 저장 후 **exit 4로 중단**. 키를 추가/충전하고 같은 명령 재실행하면 남은 것만 이어서 호출 |
+
+- Luxia 문서에는 크레딧 소진 응답 형식이 나와 있지 않다. 그래서 처음 보는 오류 응답은 `[llm] luxia HTTP <코드> (<판단>): <본문>`으로
+  한 번씩 로그에 찍힌다. 실제 소진 메시지가 위 패턴에 안 걸리면 `IKGR_LLM_EXHAUSTED_PATTERN=<정규식>`으로 추가하면 된다.
+- 키는 로그에 `#2/3 (...끝4자리)`로만 표시된다. 소진 상태는 프로세스 안에서만 유지되고, 재실행하면 1번 키부터 다시 확인한다(충전된 키 자동 재사용).
+- 각 단계 시작 시 `[step1] LLM keys: 3 key(s), 0 exhausted, using LUXIA_API_KEY key #1/3 (...ab12)`가 찍힌다.
+
 ## 6. 테스트
 
 ```bash
-python -m pytest -q tests/                         # split 재현(실제 RecBole 대조), train-only 프로필, LightGCN 동치, 메타 KG, rerank
+python -m pytest -q tests/                         # split 재현(실제 RecBole 대조), train-only 프로필, LightGCN 동치, 메타 KG, rerank, API 키 교체
 python tests/smoke_e2e.py --workdir <임시폴더>      # 합성 데이터 + 가짜 LLM/인코더로 0→R 전 단계 + 누수 가드 음성 테스트
 ```
 

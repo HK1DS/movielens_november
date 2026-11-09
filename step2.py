@@ -8,7 +8,7 @@ import pandas as pd
 from tqdm import tqdm
 from ikgr_core.utils import load_json, save_json, read_csv, write_csv, ensure_dir
 from ikgr_core.rag import IntentEncoderIndex, knn_strings
-from ikgr_core.llm_client import LocalLLM
+from ikgr_core.llm_client import AllKeysExhausted, LocalLLM
 import re, ast, json
 
 # Number of concurrent LLM requests for RAG intent expansion.
@@ -96,6 +96,7 @@ def main():
 
     ann = enc.load_ann(emb.shape[1], rag_cfg["annoy_index"])
     llm = LocalLLM(**llm_cfg)
+    print(f"[step2] LLM keys: {llm.keys.status()}", flush=True)
     sys_prompt = "You are a helpful assistant that returns ONLY JSON lists of integers."
 
     # 3) For each row, expand related intents for user & item via RAG + LLM selection
@@ -120,6 +121,8 @@ def main():
         for attempt in range(max_retries):
             try:
                 return llm.chat(sys_prompt, prompt).strip()
+            except AllKeysExhausted:
+                raise                      # no point retrying: every API key is out of credit
             except requests.exceptions.HTTPError as e:
                 status = e.response.status_code if e.response is not None else "unknown"
                 if status == 429:
@@ -183,8 +186,13 @@ def main():
     cache_lock = threading.Lock()
     failed = {"user": 0, "item": 0}
     save_state = {"since_save": 0}
+    keys_exhausted = threading.Event()
 
     def process(kind, key):
+        if keys_exhausted.is_set():            # all API keys gone: skip, re-run resumes these
+            with cache_lock:
+                failed[kind] += 1
+            return
         exact = exact_maps[kind].get(key, [])
         q_emb = emb_map[(kind, key)]
         options = knn_strings(ann, q_emb, vocab, cfg["rag"]["knn_k"])  # ANN read is thread-safe
@@ -193,6 +201,13 @@ def main():
         prompt = p_rel.replace("{PROFILE}", key).replace("{OPTIONS}", options_text)
         try:
             ans = chat_with_retry(sys_prompt, prompt)
+        except AllKeysExhausted as e:
+            if not keys_exhausted.is_set():
+                keys_exhausted.set()
+                print(f"\n[step2] {e}", flush=True)
+            with cache_lock:
+                failed[kind] += 1
+            return
         except Exception as e:
             print(f"\n[skip {kind}] permanent failure, will retry next run: {e}")
             with cache_lock:
@@ -227,6 +242,10 @@ def main():
     
     write_csv(df, paths["step2_output"])
     print(f"[step2] saved: {paths['step2_output']}")
+    if keys_exhausted.is_set():
+        print(f"[step2] STOPPED: all LLM API keys exhausted; {failed['user']} user / {failed['item']} item "
+              f"profiles not done. Add/recharge keys in .env and re-run the same command.", flush=True)
+        raise SystemExit(4)
     if failed["user"] or failed["item"]:
         # Do NOT let the pipeline mark this stage complete: failed profiles are not
         # cached, so re-running the same command calls only those.

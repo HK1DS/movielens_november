@@ -72,6 +72,10 @@ def sh(cmd, env=None):
             p.wait()
         raise SystemExit("[interrupt] stopped. Re-run the same command to resume.")
     dt = round(time.time() - t0, 1)
+    if rc == 4:
+        raise SystemExit(f"[STOP] ({dt}s) all LLM API keys are exhausted: {' '.join(cmd)}\n"
+                         f"  -> add/recharge keys in .env (LUXIA_API_KEY_2=..., or LUXIA_API_KEYS=k1,k2) "
+                         f"and re-run the same command; finished calls are cached.")
     if rc != 0:
         raise SystemExit(f"[FAIL] ({dt}s) exit={rc}: {' '.join(cmd)}")
     label = next((c for c in cmd[1:] if c.endswith(".py")), cmd[0])
@@ -148,12 +152,13 @@ def llm_preflight(cfg):
     try:
         import ssl  # noqa: F401  (HTTPS needs it; conda-based venvs can miss its DLLs)
         from ikgr_core.llm_client import LocalLLM
-        out = LocalLLM(**cfg["llm"]).chat("You are a helpful assistant that returns ONLY Python lists.",
-                                          "Return the Python list ['ok'] and nothing else.")
+        llm = LocalLLM(**cfg["llm"])
+        out = llm.chat("You are a helpful assistant that returns ONLY Python lists.",
+                       "Return the Python list ['ok'] and nothing else.")
     except Exception as e:
         raise SystemExit(f"[preflight] LLM check failed before spending: {type(e).__name__}: {e}\n"
-                         f"  -> check LUXIA_API_KEY in .env, network, and that 'import ssl' works in this Python.")
-    print(f"[preflight] LLM reachable ({cfg['llm'].get('base_url')}): {str(out).strip()[:40]!r}")
+                         f"  -> check the LUXIA_API_KEY(s) in .env, network, and that 'import ssl' works in this Python.")
+    print(f"[preflight] LLM reachable ({cfg['llm'].get('base_url')}): {str(out).strip()[:40]!r} | {llm.keys.status()}")
 
 
 def stage_signature(inputs, extra=None):

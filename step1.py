@@ -6,7 +6,7 @@ import yaml, os
 import re, ast, json
 import pandas as pd
 from tqdm import tqdm
-from ikgr_core.llm_client import LocalLLM
+from ikgr_core.llm_client import AllKeysExhausted, LocalLLM
 from ikgr_core.utils import read_csv, write_csv, ensure_dir
 
 # Number of concurrent LLM requests for intent extraction.
@@ -57,6 +57,7 @@ def main():
 
     llm_cfg = cfg["llm"]
     llm = LocalLLM(**llm_cfg)
+    print(f"[step1] LLM keys: {llm.keys.status()}", flush=True)
 
     df = read_csv(in_csv).fillna("")
     # expected columns: user_id,user_profile,item_id,item_profile
@@ -87,6 +88,8 @@ def main():
         for attempt in range(max_retries):
             try:
                 return llm.chat(sys_prompt, prompt).strip()
+            except AllKeysExhausted:
+                raise                      # no point retrying: every API key is out of credit
             except requests.exceptions.HTTPError as e:
                 status = e.response.status_code if e.response is not None else "unknown"
                 if status == 429:
@@ -116,6 +119,7 @@ def main():
     cache_lock = threading.Lock()
     failed = {"user": 0, "item": 0}
     save_state = {"since_save": 0}
+    keys_exhausted = threading.Event()
 
     def process(kind, prof, template):
         key = str(prof).strip()
@@ -125,9 +129,20 @@ def main():
         with cache_lock:
             if key in cache[kind]:
                 return
+        if keys_exhausted.is_set():            # all API keys gone: skip, re-run resumes these
+            with cache_lock:
+                failed[kind] += 1
+            return
         try:
             ans = chat_with_retry(sys_prompt, template.replace("{PROFILE}", key))
             parsed = str(parse_intent_list(ans))
+        except AllKeysExhausted as e:
+            if not keys_exhausted.is_set():
+                keys_exhausted.set()
+                print(f"\n[step1] {e}", flush=True)
+            with cache_lock:
+                failed[kind] += 1
+            return
         except Exception as e:
             # Don't cache on permanent failure -> it will be retried next run.
             print(f"\n[skip {kind}] permanent failure, will retry next run: {e}")
@@ -166,6 +181,10 @@ def main():
     
     write_csv(df, out_csv)
     print(f"[step1] saved: {out_csv}")
+    if keys_exhausted.is_set():
+        print(f"[step1] STOPPED: all LLM API keys exhausted; {failed['user']} user / {failed['item']} item "
+              f"profiles not done. Add/recharge keys in .env and re-run the same command.", flush=True)
+        raise SystemExit(4)
     if failed["user"] or failed["item"]:
         # Do NOT let the pipeline mark this stage complete: failed profiles are not
         # cached, so re-running the same command calls only those.
