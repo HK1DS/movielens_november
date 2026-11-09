@@ -1,0 +1,65 @@
+# User-editable configuration in one place.
+# run_pipeline.py copies this file to run_k{K}_{SPLIT}/config.yaml and rewrites `paths:` / `rag:` paths
+# per split, so the paths below are only defaults for running a single script by hand.
+
+dataset:
+  # Dataset adapter (data_adapters/__init__.py REGISTRY key, or "package.module:ClassName").
+  # Everything dataset-specific (raw files, item metadata, user-profile facets, metadata-KG
+  # relations) lives in the adapter. The MovieLens adapter is a skeleton: fill in its TODOs first.
+  # Dataset version is FIXED to MovieLens 25M (ml-25m), the same version as
+  # github.com/HK1DS/hk1ds_jwkim_movielens. https://files.grouplens.org/datasets/movielens/ml-25m.zip
+  # -> unzip so that raw/ml-25m/ratings.csv and raw/ml-25m/movies.csv exist (raw/ is git-ignored).
+  adapter: movielens
+  options:
+    raw_dir: raw/ml-25m
+  min_rating: null                    # e.g. 4.0 keeps only ratings >= 4 as positives (prepare_interactions.py)
+  ts_clip: null                       # e.g. ["1995-01-01", "2024-12-31"]; null = adapter default (none)
+
+paths:
+  input_csv: data/kc_k30/profiles_k30_TO.csv    # cover CSV: user_id,user_profile,item_id,item_profile
+  profile_provenance: data/kc_k30/profile_provenance_k30_TO.csv.gz
+  workdir: run/                       # will be created
+  step1_output: run/step1_intents.csv
+  step2_output: run/step2_related_intents.csv
+  kg_triples: run/kg_triples.txt
+  inter_file: data/kc_k30/interactions_k30.csv  # its directory holds the RecBole dataset folder
+  recbole_dump: run/recbole/
+  kg_pack: run/kg_pack.pt
+  meta_kg_pack: run/meta_kg_pack.pt
+
+
+llm:
+  # Luxia Cloud API (OpenAI GPT-4o-mini Bridge); key from .env (LUXIA_API_KEY)
+  base_url: https://bridge.luxiacloud.com/llm/openai/chat/completions/gpt-4o-mini
+  api_key: "${LUXIA_API_KEY}"
+  model: "llm"
+  provider: luxia
+  temperature: 0.2
+  top_p: 0.95
+  max_tokens: 2048
+
+rag:
+  encoder: "sentence-transformers/all-mpnet-base-v2"
+  annoy_trees: 50
+  knn_k: 100
+  encoding_npy: run/intents_emb.npy
+  annoy_index: run/intents.ann
+  vocab_json: run/intent_vocab.json
+
+recbole:
+  model: "IKGR"
+  dataset: "ikgr-custom"            # RecBole atomic dataset name (data/kc_k{K}/ikgr-custom/ikgr-custom.inter)
+  topk: [10, 30]
+  metrics: ["Recall", "MRR", "NDCG", "Hit", "Precision"]
+  # Shared training / model-selection protocol (identical for EVERY spec incl. BPR/LightGCN).
+  # The checkpoint with the best validation `valid_metric` is evaluated on test.
+  epochs: 40                        # max epochs (early stopping usually ends sooner)
+  eval_step: 2                      # validate every N epochs
+  stopping_step: 3                  # stop after N validations without improvement
+  valid_metric: NDCG@10
+  learning_rate: 0.001
+  reg_weight: 0.000001
+  lambda_mix: 0.1                   # lambda in Eq. (11)
+  embedding_size: 64                # shared by every spec (512 made true LightGCN ~24 min/epoch on Goodreads k=30)
+  gcn_layers: 1
+  dropout: 0.1

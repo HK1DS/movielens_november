@@ -1,0 +1,16 @@
+# Minimal, tested dependency set for the leakage-free IKGR pipeline
+# (run_pipeline.py / eval_slices.py / step1 / step2 / paired_compare).
+# torch is installed separately from the PyTorch index (GPU build), e.g.
+#   pip install torch==2.3.0 --index-url https://download.pytorch.org/whl/cu121
+# scripts/setup_venv.ps1 does both steps. Python 3.10-3.12.
+pandas==2.2.2
+numpy==1.26.4
+scipy==1.13.1
+scikit-learn==1.5.1
+pyyaml>=6.0
+tqdm>=4.66
+requests>=2.32
+recbole==1.2.0
+sentence-transformers==3.0.1
+transformers==4.44.2
+pytest>=8.0

@@ -1,0 +1,9 @@
+(Reasonably replace this prompt in accordance with your dataset specifics) You are given a short profile text. Extract concise "intents" that represent what the subject seeks (for user) or satisfies (for item). 
+- Keep domain-specific and discriminative intents.
+- Drop overly generic terms (e.g., "information", "good", "data").
+- Return ONLY a Python list of strings, e.g., ["intent1", "intent2"].
+
+### Profile:
+{PROFILE}
+
+### Answer:
