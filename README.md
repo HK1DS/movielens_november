@@ -155,6 +155,7 @@ scripts/setup_venv.ps1         Windows GPU venv (기존 goodreads-ikgr venv 재�
 | ~4.8 회/초 (동시 8, 제한 없음) | 2026-11 Goodreads step2 실측(15,198회/53분) | **약 17시간** |
 | ~1 회/초 (429 후 1초 간격) | 2026-07 이전 MovieLens 레포에서 Luxia가 동시 8에 429 → 1초 페이싱 | **약 3.5일** |
 | **~1.1 회/초 (≈4,000회/시간)** | **2026-11-10 이 레포 실측** (TO step1: 아이템 15,784 + 유저 13,062회, `run_k30_TO/llm_progress_step1.csv`). 429가 계속 나서 간격이 0.5–1초에 머묾. 유저 프롬프트가 아이템보다 10배 길어도 속도가 같음 → 토큰이 아니라 **요청 수 제한** | 남은 TO+TO_GLOBAL B/C 약 48만 회 → **약 5일** |
+| **~1.5 회/초 (≈5,400회/시간)** | **2026-11-10 키 3개 병렬 1시간 실측** (5,443회; 키별 1,935 / 1,736 / 1,772회, 429는 11 / 18 / 10회). 키 1개 대비 **+34%** — 3배가 아니므로 제한이 순수 키 단위는 아님(계정·서비스 공용 제한이 섞인 것으로 보임). 키별 요청 간격이 1.4–3.6초까지 올라감 | 남은 약 47.7만 회 → **약 3.7일** |
 
 어느 쪽인지는 계정 한도에 달려 있어서 파일럿 리포트의 `projected`가 실제 값이다. 무료 준비(0ATPS)는 25M 행 처리로 약 15–30분,
 step2 첫 실행은 mpnet 인코더(~420MB) 다운로드가 붙는다. 비용은 `S` 단계가 계산한다(Goodreads 관측 단가 기준 $0.50–0.61/1천 회 → 30만 회면 약 $150–180, 정가 기준은 그보다 낮음).
@@ -177,19 +178,26 @@ step1/step2는 1분마다 `run_k30_<SPLIT>\llm_progress_step{1,2}.csv`에 누적
 429·HTTP·기타 오류 수, 현재 요청 간격, 키 상태를 남긴다(재개한 실행은 같은 파일에 이어 붙음 → 그대로 추세 그래프).
 아이템을 먼저 처리한다(카탈로그 텍스트만 쓰므로 split·유저 프로필 형식과 무관하게 재사용됨). Windows에서는 실행 중 절전을 막는다.
 
-LLM 속도 관련 환경변수: `IKGR_STEP1_WORKERS` / `IKGR_STEP2_WORKERS`(기본 8), `IKGR_LLM_MIN_INTERVAL_SECONDS`(처음부터 요청 간격, 기본 0),
-`IKGR_LLM_429_MIN_INTERVAL_SECONDS`(첫 429 이후 전 워커 공통 간격, 기본 1.0), `IKGR_LLM_PACE_RECOVER_EVERY`(429 없이 이만큼 성공하면
-간격을 `IKGR_LLM_PACE_RECOVER_FACTOR`=0.75배로 완화, 기본 200; 0이면 이전 레포처럼 끝까지 유지), `IKGR_CACHE_SAVE_EVERY`(캐시 저장 간격, 기본 500회).
+LLM 속도 관련 환경변수(요청 간격은 **키마다 따로** 관리된다): `IKGR_LLM_KEY_MODE`(`parallel` 기본 = 모든 키 동시 호출 / `sequential` = 한 번에 키 하나),
+`IKGR_LLM_WORKERS_PER_KEY`(키당 동시 요청 수, 기본 8 → 키 3개면 워커 24), `IKGR_STEP1_WORKERS` / `IKGR_STEP2_WORKERS`(설정하면 전체 워커 수를 고정),
+`IKGR_LLM_MIN_INTERVAL_SECONDS`(처음부터 요청 간격, 기본 0), `IKGR_LLM_429_MIN_INTERVAL_SECONDS`(그 키의 첫 429 이후 간격, 기본 1.0),
+`IKGR_LLM_PACE_RECOVER_EVERY`(그 키가 429 없이 이만큼 성공하면 간격을 `IKGR_LLM_PACE_RECOVER_FACTOR`=0.75배로 완화, 기본 200; 0이면 끝까지 유지),
+`IKGR_CACHE_SAVE_EVERY`(캐시 저장 간격, 기본 500회).
 
 중단/재개는 Goodreads 레포와 같다: Ctrl+C 후 같은 명령을 다시 실행하면 0/A/T/P는 산출물이 있으면 건너뛰고,
 B/C는 LLM 캐시에 없는 프로필만 호출하고, B/C/D는 입력 해시가 같으면 통째로 건너뛰고(`--redo D` 등으로 강제),
 E는 끝난 spec×seed를 유지한다. `eval_slices.py`·`model_ikgr.py`·`corona_retriever.py`나 설정을 바꾸면
 끝난 결과도 다시 학습한다(의도된 안전장치).
 
-### Luxia API 키 여러 개 (자동 교체)
+### Luxia API 키 여러 개 (병렬 호출 + 소진 시 제외)
 
-`.env`에 키를 여러 개 넣으면 앞에서부터 쓰다가, 현재 키의 크레딧/토큰이 떨어지면 **다음 키로 자동 교체**한다
-(`ikgr_core/key_pool.py`). 순서는 `LUXIA_API_KEY` → `LUXIA_API_KEY_1`, `_2`, … → `LUXIA_API_KEYS=k1,k2` (섞어 써도 됨).
+`.env`에 키를 여러 개 넣으면 step1/step2가 **모든 키를 동시에** 호출한다(`ikgr_core/key_lanes.py`, `IKGR_LLM_KEY_MODE=parallel` 기본).
+키마다 요청 간격(429 쿨다운·AIMD)과 동시 요청 상한(`IKGR_LLM_WORKERS_PER_KEY`, 기본 8)이 따로 있어서, 429를 받은 키만 느려지고
+새 요청은 지금 가장 빨리 보낼 수 있는 키로 간다. 크레딧/토큰이 떨어진 키는 빠지고 남은 키가 이어받는다(`ikgr_core/key_pool.py`).
+Luxia 제한이 **키 단위**면 키 개수만큼 빨라지고, **계정 단위**(같은 계정의 키들)면 총 처리량은 비슷하고 429만 늘어난다.
+어느 쪽인지는 진행 로그 `keys` 열(`parallel: #1 0.56s 4012ok/20x429 | #2 …`)과 `step1_throughput.json`의 `per_key`로 확인한다.
+예전처럼 한 키씩 소진될 때까지 쓰려면 `IKGR_LLM_KEY_MODE=sequential`.
+키 순서는 `LUXIA_API_KEY` → `LUXIA_API_KEY_1`, `_2`, … → `LUXIA_API_KEYS=k1,k2` (섞어 써도 됨).
 
 ```ini
 LUXIA_API_KEY=첫번째키
@@ -199,16 +207,16 @@ LUXIA_API_KEY_3=세번째키
 
 | 응답 | 판단 | 동작 |
 |---|---|---|
-| HTTP 401 / 402 / 403 | 키 무효·미결제·차단 | 즉시 다음 키로 같은 요청 재시도 |
-| 본문에 소진 문구(`insufficient`, `quota`, `credit`, `balance`, `크레딧`, `잔액`, `충전`, `부족` …) — HTTP 200 오류 JSON 포함 | 크레딧/토큰 소진 | 즉시 다음 키 |
-| 일반 HTTP 429 (본문에 소진 문구 없음) | rate limit | 같은 키로 기존 backoff 재시도 |
-| 한 키가 성공 없이 429만 `IKGR_LLM_ROTATE_AFTER_429_SEC`초(기본 600) 이상 | 사실상 사용 불가 | 다음 키 (0이면 끔) |
+| HTTP 401 / 402 / 403 | 키 무효·미결제·차단 | 그 키를 빼고 같은 요청을 즉시 다른 키로 재시도 |
+| 본문에 소진 문구(`insufficient`, `quota`, `credit`, `balance`, `크레딧`, `잔액`, `충전`, `부족` …) — HTTP 200 오류 JSON 포함 | 크레딧/토큰 소진 | 그 키를 빼고 즉시 다른 키 |
+| 일반 HTTP 429 (본문에 소진 문구 없음) | rate limit | **그 키만** 쿨다운·간격 증가, backoff 후 재시도(가장 빨리 보낼 수 있는 키로) |
+| 한 키가 성공 없이 429만 `IKGR_LLM_ROTATE_AFTER_429_SEC`초(기본 600) 이상 | 사실상 사용 불가 | 그 키를 뺌 (0이면 끔) |
 | 모든 키 소진 | — | step1/step2가 캐시 저장 후 **exit 4로 중단**. 키를 추가/충전하고 같은 명령 재실행하면 남은 것만 이어서 호출 |
 
 - Luxia 문서에는 크레딧 소진 응답 형식이 나와 있지 않다. 그래서 처음 보는 오류 응답은 `[llm] luxia HTTP <코드> (<판단>): <본문>`으로
   한 번씩 로그에 찍힌다. 실제 소진 메시지가 위 패턴에 안 걸리면 `IKGR_LLM_EXHAUSTED_PATTERN=<정규식>`으로 추가하면 된다.
 - 키는 로그에 `#2/3 (...끝4자리)`로만 표시된다. 소진 상태는 프로세스 안에서만 유지되고, 재실행하면 1번 키부터 다시 확인한다(충전된 키 자동 재사용).
-- 각 단계 시작 시 `[step1] LLM keys: 3 key(s), 0 exhausted, using LUXIA_API_KEY key #1/3 (...ab12)`가 찍힌다.
+- 각 단계 시작 시 `[step1] API keys: parallel over 3 key(s): up to 8 request(s) in flight per key, 24 worker threads`가 찍힌다.
 
 ## 6. 테스트
 

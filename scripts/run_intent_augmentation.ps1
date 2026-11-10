@@ -6,6 +6,7 @@
 #   scripts\intent_full.bat    (= this script -Full)      data prep (skipped if done) + full B/C + KG packs (D)
 #   scripts\intent_run_7h.bat  (= -Full -Hours 7 -Yes)    full B/C for at most 7 hours, no prompt; pauses with the
 #                                                       cache saved (re-run to continue); trend in llm_progress_*.csv
+#   scripts\intent_run_1h.bat  (= -Full -Hours 1 -Yes)    same, 1 hour (speed test)
 #   scripts\intent_stop.bat                               graceful pause of a running B/C (creates run_k*_*\STOP)
 #   -RebuildProfiles   rebuild the train-only user profiles of TO and TO_GLOBAL first (after a profile-format
 #                      change; item intents already in the LLM cache stay valid)

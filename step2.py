@@ -9,14 +9,13 @@ from tqdm import tqdm
 from ikgr_core.utils import load_json, save_json, read_csv, write_csv, ensure_dir
 from ikgr_core.rag import IntentEncoderIndex, knn_strings
 from ikgr_core.llm_client import AllKeysExhausted, LocalLLM
-from ikgr_core.rate_limit import SharedRateLimiter, backoff_with_jitter, retry_after_seconds
+from ikgr_core.key_lanes import KeyLanes, chat_with_retry as lanes_chat
 from ikgr_core.llm_run import EXIT_PAUSED, Progress, deadline, keep_awake, time_up
 import re, ast, json, time
-import requests
 
-# Number of concurrent LLM requests for RAG intent expansion.
-# Override via env var IKGR_STEP2_WORKERS if the provider allows more throughput.
-MAX_WORKERS = int(os.environ.get("IKGR_STEP2_WORKERS", "8"))
+# Worker threads: by default 8 per API key, all keys in parallel (ikgr_core/key_lanes.py);
+# IKGR_STEP2_WORKERS fixes the total instead.
+WORKERS_ENV = os.environ.get("IKGR_STEP2_WORKERS")
 # Retry policy for transient API errors (429 rate limits, 5xx). Overridable for tests.
 LLM_MAX_RETRIES = int(os.environ.get("IKGR_LLM_MAX_RETRIES", "10"))
 LLM_RETRY_DELAY = float(os.environ.get("IKGR_LLM_RETRY_DELAY", "5"))
@@ -102,7 +101,7 @@ def main():
 
     ann = enc.load_ann(emb.shape[1], rag_cfg["annoy_index"])
     llm = LocalLLM(**llm_cfg)
-    print(f"[step2] LLM keys: {llm.keys.status()}", flush=True)
+    print(f"[step2] LLM keys: {len(llm.keys)} configured, {len(llm.keys.usable())} usable", flush=True)
     if keep_awake():
         print("[step2] Windows sleep blocked while this step runs", flush=True)
     sys_prompt = "You are a helpful assistant that returns ONLY JSON lists of integers."
@@ -123,47 +122,14 @@ def main():
             json.dump(cache, f, ensure_ascii=False)
         os.replace(tmp, cache_path)
 
-    rate_limiter = SharedRateLimiter()
+    lanes = KeyLanes(llm.keys, total_workers=int(WORKERS_ENV) if WORKERS_ENV else None)
+    MAX_WORKERS = lanes.workers
+    print(f"[step2] API keys: {lanes.describe()}", flush=True)
     progress = Progress()
 
     def chat_with_retry(sys_prompt, prompt, max_retries=LLM_MAX_RETRIES, initial_delay=LLM_RETRY_DELAY):
-        # Shared pacing across workers (ikgr_core/rate_limit.py): honours Retry-After, adds jitter,
-        # and switches every worker to the stable interval after the first 429.
-        delay = initial_delay
-        for attempt in range(max_retries):
-            try:
-                rate_limiter.acquire()
-                out = llm.chat(sys_prompt, prompt).strip()
-                rate_limiter.note_success()        # lets the pacing relax again after a 429-free streak
-                return out
-            except AllKeysExhausted:
-                raise                      # no point retrying: every API key is out of credit
-            except requests.exceptions.HTTPError as e:
-                status = e.response.status_code if e.response is not None else "unknown"
-                progress.error("429" if status == 429 else "http")
-                if status == 429:
-                    wait = max(delay, retry_after_seconds(e.response) or 0.0)
-                    switched = rate_limiter.defer_all(wait)
-                    sleep_for = backoff_with_jitter(wait)
-                    print(f"\n[Rate Limit 429] shared cooldown {wait:.1f}s; retrying in {sleep_for:.1f}s "
-                          f"(attempt {attempt+1}/{max_retries})...")
-                    if switched:
-                        print(f"[Rate Limit 429] all workers now paced at one request start per "
-                              f"{rate_limiter.min_interval_seconds:.2f}s")
-                    time.sleep(sleep_for)
-                else:
-                    sleep_for = backoff_with_jitter(delay)
-                    print(f"\n[HTTP Error {status}] Retrying in {sleep_for:.1f} seconds...")
-                    time.sleep(sleep_for)
-                delay = min(delay * 2, 60)
-            except Exception as e:
-                progress.error("other")
-                sleep_for = backoff_with_jitter(delay)
-                print(f"\n[Error] {e}. Retrying in {sleep_for:.1f} seconds...")
-                time.sleep(sleep_for)
-                delay = min(delay * 2, 60)
-        rate_limiter.acquire()
-        return llm.chat(sys_prompt, prompt).strip()
+        # Per-key pacing (each key its own 429 cooldown / interval) and retries: ikgr_core/key_lanes.py
+        return lanes_chat(llm, lanes, progress, sys_prompt, prompt, max_retries, initial_delay)
 
     unique_users = df[df["user_profile"] != ""]["user_profile"].unique()
     unique_items = df[df["item_profile"] != ""]["item_profile"].unique()
@@ -265,17 +231,18 @@ def main():
     if jobs:
         from ikgr_core.jobs import run_interruptible
         _t0 = time.time()
-        progress.start(os.path.join(paths["workdir"], "llm_progress_step2.csv"), len(jobs), rate_limiter, llm.keys)
+        progress.start(os.path.join(paths["workdir"], "llm_progress_step2.csv"), len(jobs), lanes, lanes)
         try:
             run_interruptible(process, jobs, MAX_WORKERS, "Expanding Intents", save_cache)
         finally:
             progress.stop()
         _dt = time.time() - _t0
         print(f"[step2] throughput: calls={save_state['done']} seconds={_dt:.1f} "
-              f"rate={save_state['done'] / max(_dt, 1e-9):.2f}/s | keys: {llm.keys.status()}", flush=True)
+              f"rate={save_state['done'] / max(_dt, 1e-9):.2f}/s | keys: {lanes.status()}", flush=True)
         with open(os.path.join(paths["workdir"], "step2_throughput.json"), "w", encoding="utf-8") as f:
             json.dump({"calls": save_state["done"], "seconds": round(_dt, 2), "workers": MAX_WORKERS,
-                       "paced_interval_s": rate_limiter.min_interval_seconds}, f)
+                       "paced_interval_s": lanes.min_interval_seconds,
+                       "key_mode": lanes.mode, "per_key": lanes.per_key()}, f)
 
     save_cache()
 

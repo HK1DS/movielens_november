@@ -1,5 +1,5 @@
 """
-API-key pool with rotation on exhausted keys (shared by every LLM worker thread).
+API-key pool: which keys exist and which are exhausted (shared by every LLM worker thread).
 
 Keys come from the environment (and .env, loaded by llm_client) for one base
 variable name, e.g. LUXIA_API_KEY:
@@ -9,10 +9,12 @@ variable name, e.g. LUXIA_API_KEY:
   LUXIA_API_KEY_2=key-c
   LUXIA_API_KEYS=key-d,key-e          comma/whitespace separated list
 
-Order of use: LUXIA_API_KEY, LUXIA_API_KEY_1, _2, ..., then LUXIA_API_KEYS
-(duplicates removed). The pool always hands out the first key that is not
-marked exhausted; there is no round-robin, so a key is drained before the next
-one is touched.
+Order: LUXIA_API_KEY, LUXIA_API_KEY_1, _2, ..., then LUXIA_API_KEYS (duplicates
+removed). acquire() hands out the first key that is not marked exhausted (one key
+at a time). The paid stages (step1 / step2) instead go through key_lanes.KeyLanes,
+which by default calls every usable key in parallel, each with its own pacing, and
+pins a request to one key with key(idx); an exhausted key then drops out and the
+other keys carry on (KeyExhausted tells the caller to pick another key).
 
 A key is marked exhausted (for the rest of this process) when a call with it
   - returns HTTP 401 / 402 / 403 (invalid, unpaid or blocked key),
@@ -46,6 +48,14 @@ EXHAUSTED_PATTERN = (
 
 class AllKeysExhausted(RuntimeError):
     """Every configured API key is exhausted / unusable in this process."""
+
+
+class KeyExhausted(RuntimeError):
+    """The key a request was pinned to is exhausted; retry the request on another key."""
+
+    def __init__(self, idx):
+        super().__init__(f"API key #{idx + 1} is exhausted")
+        self.idx = idx
 
 
 def _exhausted_regex():
@@ -111,6 +121,25 @@ class KeyPool:
     def _name(self, idx):
         return f"{self.label} key #{idx + 1}/{len(self.keys)} ({mask(self.keys[idx])})"
 
+    def name(self, idx):
+        return self._name(idx)
+
+    def is_usable(self, idx):
+        with self._lock:
+            return idx not in self._exhausted
+
+    def usable(self):
+        """Indices of the keys not marked exhausted, in order of use."""
+        with self._lock:
+            return [i for i in range(len(self.keys)) if i not in self._exhausted]
+
+    def key(self, idx):
+        """The key with index idx; raises KeyExhausted once it is marked exhausted."""
+        with self._lock:
+            if idx in self._exhausted:
+                raise KeyExhausted(idx)
+            return self.keys[idx]
+
     def _current(self):
         for i in range(len(self.keys)):
             if i not in self._exhausted:
@@ -130,8 +159,9 @@ class KeyPool:
             if idx in self._exhausted:
                 return
             self._exhausted[idx] = reason
-            nxt = self._current()
-            where = f"switching to {self._name(nxt)}" if nxt is not None else "NO keys left"
+            left = [i for i in range(len(self.keys)) if i not in self._exhausted]
+            where = (f"{len(left)} usable key(s) left, next in line {self._name(left[0])}" if left
+                     else "NO keys left")
             print(f"\n[llm-keys] {self._name(idx)} exhausted ({reason}) -> {where}", flush=True)
 
     def note_rate_limited(self, idx):
@@ -153,6 +183,9 @@ class KeyPool:
             i = self._current()
             using = self._name(i) if i is not None else "none usable"
             return f"{len(self.keys)} key(s), {len(self._exhausted)} exhausted, using {using}"
+
+    def summary(self):
+        return self._summary()
 
     def _summary(self):
         lines = [f"all {len(self.keys)} {self.label} API key(s) are exhausted:"]

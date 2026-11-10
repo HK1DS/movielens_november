@@ -31,6 +31,8 @@ from typing import Optional
 class SharedRateLimiter:
     """Serialize request starts and share provider-imposed cooldowns across workers.
 
+    One instance per API key (ikgr_core/key_lanes.py): workers using the same key share it.
+
     A provider limit applies to the API key, not to an individual worker.  Without
     this small shared gate, workers that all receive a 429 tend to retry together
     and repeatedly create another burst.
@@ -64,6 +66,12 @@ class SharedRateLimiter:
         wait = scheduled - now
         if wait > 0:
             time.sleep(wait)
+
+    def ready_at(self) -> float:
+        """Monotonic time from which the next request may start (may lie in the past); used to pick
+        the key that can serve a request soonest."""
+        with self._lock:
+            return max(self._next_allowed, self._cooldown_until)
 
     def defer_all(self, seconds: float) -> bool:
         """Apply a 429 backoff and, when needed, enter the stable pacing mode.

@@ -5,7 +5,8 @@ from typing import Dict, Optional
 
 import requests
 
-from .key_pool import AllKeysExhausted, KeyPool, classify_failure, collect_keys, get_pool  # noqa: F401
+from .key_pool import (AllKeysExhausted, KeyExhausted, KeyPool, classify_failure, collect_keys,  # noqa: F401
+                       get_pool)
 
 
 class LLMResponseError(RuntimeError):
@@ -130,9 +131,15 @@ class LocalLLM:
             self._SEEN_ERRORS.add(sig)
         print(f"\n[llm] {self.provider} HTTP {status} ({kind}): {_snippet(body) or '<empty body>'}", flush=True)
 
-    def chat(self, system_prompt: str, user_prompt: str) -> str:
+    def chat(self, system_prompt: str, user_prompt: str, key_idx: Optional[int] = None) -> str:
+        """key_idx=None: the first usable key, moving on to the next one when a key is exhausted.
+        key_idx=i: only key i (key_lanes.KeyLanes); raises KeyExhausted when it is (or turns out to be)
+        exhausted, so the caller can retry on another key with that key's own pacing."""
         while True:
-            idx, key = self.keys.acquire()          # raises AllKeysExhausted
+            if key_idx is None:
+                idx, key = self.keys.acquire()      # raises AllKeysExhausted
+            else:
+                idx, key = key_idx, self.keys.key(key_idx)   # raises KeyExhausted
             try:
                 if self.provider == "gemini":
                     out = self._chat_gemini(system_prompt, user_prompt, key)
@@ -148,6 +155,8 @@ class LocalLLM:
                 self._log_error_once(status, body, kind)
                 if kind == "exhausted":
                     self.keys.mark_exhausted(idx, f"HTTP {status}: {_snippet(body, 120) or 'no body'}")
+                    if key_idx is not None:
+                        raise KeyExhausted(idx)
                     continue                          # same request, next key
                 if kind == "rate_limited":
                     self.keys.note_rate_limited(idx)  # rotates only after a long 429-only streak
@@ -157,6 +166,8 @@ class LocalLLM:
                 self._log_error_once(200, e.body, kind)
                 if kind == "exhausted":
                     self.keys.mark_exhausted(idx, f"HTTP 200 error body: {_snippet(e.body, 120)}")
+                    if key_idx is not None:
+                        raise KeyExhausted(idx)
                     continue
                 raise
             self.keys.note_success(idx)

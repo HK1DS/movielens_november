@@ -64,8 +64,8 @@ def test_pilot_projects_time_and_full_run_reuses_it(tmp_path):
             out = run("pilot_llm.py", "--k", "5", "--split", "TO", "--n_users", "20", "--n_items", "10", "--yes")
         finally:
             os.environ.pop("FAKE_LLM_429_FIRST"); os.environ.pop("FAKE_LLM_RETRY_AFTER")
-        assert "[Rate Limit 429] shared cooldown" in out
-        assert re.search(r"all workers now paced at one request start per 0\.0\d+s", out)  # 0.02, or x1.5 if 429s race
+        assert re.search(r"\[Rate Limit 429\] config key #1/1 \(\.\.\.\w+\): cooldown", out)
+        assert re.search(r"requests on this key now paced at one request start per 0\.0\d+s", out)  # 0.02, x1.5 if 429s race
         assert "[llm-keys]" not in out and "0 exhausted" in out           # plain 429 never rotates keys
         pdir = wd / "run_k5_TO_pilot"
         res = json.load(open(pdir / "pilot_result.json", encoding="utf-8"))
