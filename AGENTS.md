@@ -28,3 +28,5 @@
 - 2026-11-10: MovieLens 어댑터 구현 — 이전 레포와 같은 선택(평점 전부 implicit, `(no genres listed)` 제외,
   item text `title | genres`, genre만 메타/facet, 태그 미사용). Luxia 공유 페이싱(`ikgr_core/rate_limit.py`, 이전 레포에서 이식;
   시작은 무제한, 첫 429에 1초 간격), 캐시 저장 500회 간격, `pilot_llm.py` + `scripts\intent_pilot.bat` / `intent_full.bat`.
+- 2026-11-10: 데이터 규모를 이전 MovieLens 레포 최종 패키지와 동일하게 고정(ml-25m, k=30: 133,684 / 15,785 / 24,046,865).
+  단계 0·A 크기를 어댑터 `REFERENCE`와 대조(`scale_check.json`), 불일치 시 B/C 차단. `scripts\intent_prep.bat` = 무료 준비만(TO+TO_GLOBAL).

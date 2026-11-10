@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import argparse
+import json
 import os
 
 def filter_k_core(df, k):
@@ -58,6 +59,9 @@ def main():
 
     interactions_out = os.path.join(args.out_dir, f"interactions_k{args.k}.csv")
     filtered_inter.to_csv(interactions_out, index=False)
+    with open(interactions_out + ".stats.json", "w", encoding="utf-8") as f:
+        json.dump({"k": args.k, "interactions": int(len(filtered_inter)), "users": int(n_u), "items": int(n_i),
+                   "input": os.path.abspath(args.interactions_in)}, f, indent=2)
     print(f"[Saved] interactions -> {interactions_out}")
 
 

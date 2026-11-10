@@ -131,10 +131,17 @@ scripts/setup_venv.ps1         Windows GPU venv (기존 goodreads-ikgr venv 재�
 
 | 파일 | 하는 일 |
 |---|---|
+| `scripts\intent_prep.bat` | **무료 준비만** (LLM 호출 없음): ml-25m 다운로드 → k=30 core → TO·TO_GLOBAL 두 split의 train-only 프로필 → 이전 레포 규모와 대조 → 두 split의 LLM 비용 추정 |
 | `scripts\intent_pilot.bat` | ml-25m 다운로드·압축해제(없으면) → 무료 준비 `0ATPS` → **파일럿**: 실제 프로필 300명+아이템 100개(~800회 호출)로 Luxia 처리속도를 재서 전체 소요시간을 외삽하고, intent 샘플을 `run_k30_TO_pilot\pilot_report.md`에 남김 |
 | `scripts\intent_full.bat` | (준비가 끝났으면 건너뜀) → 전체 step1·step2 + KG pack(D). 첫 유료 호출 전에 비용 추정과 y/N 확인 |
 
-둘 다 Ctrl+C로 멈추고 같은 파일을 다시 실행하면 이어서 한다. 파일럿의 step1 결과는 본 실행이 재사용한다.
+모두 Ctrl+C로 멈추고 같은 파일을 다시 실행하면 이어서 한다. 파일럿의 step1 결과는 본 실행이 재사용한다.
+
+**데이터 규모 = 이전 MovieLens 레포와 동일 (k=30 전체).** 이전 레포의 최종 패키지는 ml-25m 전체를 k=30으로 거른
+유저 133,684 · 아이템 15,785 · 상호작용 24,046,865(TO·TO_GLOBAL 공통)였다(1k/5k 샘플은 중간 점검용). 같은 입력
+(장르 없는 영화 제외 후 평점 24,973,468개)에 같은 (k,k)-core 정의라 숫자가 정확히 같아야 하고, `run_pipeline.py`가
+단계 0·A 직후 이 기준값과 대조해 `run_k30_<SPLIT>\scale_check.json`에 남긴다. **다르면 유료 단계(B/C)를 막는다**
+(`--ignore_scale_check`로 의도적으로만 우회). 기준값은 `data_adapters/movielens.py`의 `REFERENCE`.
 
 **소요 시간 (k=30, TO)** — 호출 수 ≈ (유저 ~13.4만 + 아이템 ~1.6만) × 2단계 ≈ **30만 회**:
 

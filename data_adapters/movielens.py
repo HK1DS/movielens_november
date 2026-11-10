@@ -75,7 +75,7 @@ class MovieLensAdapter(DatasetAdapter):
         """{movieId: (title, [genres], raw genres string)} for every movie in movies.csv."""
         if self._movies is None:
             movies = {}
-            with open(self._require("movies.csv"), encoding="utf-8", newline="") as f:
+            with open(self._require("movies.csv"), encoding="utf-8-sig", newline="") as f:
                 for row in csv.DictReader(f):
                     genres_raw = _clean(row.get("genres"))
                     genres = [] if genres_raw == NO_GENRES else [g for g in genres_raw.split("|") if g]
@@ -86,7 +86,7 @@ class MovieLensAdapter(DatasetAdapter):
     def iter_interactions(self):
         movies = self._load_movies()
         skip = {m for m, (_, genres, _) in movies.items() if not genres} if self.drop_no_genres else set()
-        with open(self._require("ratings.csv"), encoding="utf-8", newline="") as f:
+        with open(self._require("ratings.csv"), encoding="utf-8-sig", newline="") as f:
             r = csv.reader(f)
             header = next(r)
             iu, im, ir, it = (header.index(c) for c in ("userId", "movieId", "rating", "timestamp"))
@@ -106,6 +106,20 @@ class MovieLensAdapter(DatasetAdapter):
             profile = " | ".join(p for p in (title, genres_raw) if p)      # earlier repo's item text
             out[str(iid)] = ItemMeta(title=title, profile=profile, relations={"genre": genres})
         return out
+
+    # Sizes of the earlier repo's runs on the same ml-25m files (HK1DS/hk1ds_jwkim_movielens README,
+    # "Full MovieLens 25M k=30 final evaluation package"), valid for drop_no_genres=True and no
+    # rating threshold. run_pipeline.py checks stage 0 / A against them.
+    REFERENCE = {
+        "prepared": {"interactions": 24_973_468, "users": 162_541, "items": 54_479},
+        "kcore": {30: {"interactions": 24_046_865, "users": 133_684, "items": 15_785}},
+    }
+
+    def reference_stats(self, k):
+        if not self.drop_no_genres or k not in self.REFERENCE["kcore"]:
+            return None
+        return {"prepared": self.REFERENCE["prepared"], "kcore": self.REFERENCE["kcore"][k],
+                "source": "HK1DS/hk1ds_jwkim_movielens (ml-25m, k=30 final package)"}
 
     def source_files(self):
         # Files whose content feeds profiles / the metadata KG (hashed into the stage-D signature).

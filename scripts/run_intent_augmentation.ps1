@@ -1,7 +1,9 @@
 # MovieLens 25M -> LLM intent augmentation (stages B/C) on Windows.
 #
-#   scripts\intent_pilot.bat   (= this script)        data prep + small LLM pilot (time/cost projection)
-#   scripts\intent_full.bat    (= this script -Full)  data prep (skipped if done) + full B/C + KG packs (D)
+#   scripts\intent_prep.bat    (= this script -PrepOnly)  free data prep only, both splits (TO + TO_GLOBAL),
+#                                                       same scale as HK1DS/hk1ds_jwkim_movielens (k=30)
+#   scripts\intent_pilot.bat   (= this script)            data prep + small LLM pilot (time/cost projection)
+#   scripts\intent_full.bat    (= this script -Full)      data prep (skipped if done) + full B/C + KG packs (D)
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\run_intent_augmentation.ps1 [-Full] [-K 30] [-Split TO]
 #
@@ -14,6 +16,7 @@ param(
     [int]$K = 30,
     [string]$Split = "TO",
     [switch]$Full,
+    [switch]$PrepOnly,
     [string]$Python = "",
     [int]$PilotUsers = 300,
     [int]$PilotItems = 100
@@ -66,6 +69,19 @@ Write-Host "[data] $raw ready"
 # 4) free stages: interactions -> k-core -> RecBole .inter -> train-only profiles -> cost estimate
 & $Python -u run_pipeline.py --k $K --split $Split --steps 0ATPS
 if ($LASTEXITCODE -ne 0) { Fail "data preparation failed (see above)" }
+
+if ($PrepOnly) {
+    # the other temporal protocol of the earlier repo: only its train-only profiles + estimate (free)
+    $other = if ($Split -eq "TO") { "TO_GLOBAL" } else { "TO" }
+    & $Python -u run_pipeline.py --k $K --split $other --steps PS
+    if ($LASTEXITCODE -ne 0) { Fail "data preparation for $other failed (see above)" }
+    Write-Host ""
+    Write-Host "[done] data prepared (no LLM call made):"
+    Write-Host "  size check : run_k$($K)_$($Split)\scale_check.json"
+    Write-Host "  estimates  : run_k$($K)_$($Split)\llm_cost_estimate.json, run_k$($K)_$($other)\llm_cost_estimate.json"
+    Write-Host "  next       : scripts\intent_pilot.bat (pilot) or scripts\intent_full.bat (full run)"
+    exit 0
+}
 
 if (-not $Full) {
     # 5a) pilot: small paid sample -> real throughput, projected time, sample intents

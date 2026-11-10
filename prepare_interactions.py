@@ -12,6 +12,7 @@ Usage
 """
 import argparse
 import csv
+import json
 import os
 
 import yaml
@@ -33,6 +34,7 @@ def main():
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     n_in = n_out = n_no_ts = 0
+    users, items = set(), set()
     tmp = args.out + ".tmp"
     with open(tmp, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
@@ -44,10 +46,16 @@ def main():
             if not ts or ts <= 0:
                 n_no_ts += 1
             w.writerow([uid, iid, rating, ts])
+            users.add(uid)
+            items.add(iid)
             n_out += 1
     os.replace(tmp, args.out)
-    print(f"[prepare] adapter={adapter.name} rows in={n_in:,} kept={n_out:,} "
-          f"(min_rating={min_rating}) missing_ts={n_no_ts:,} -> {args.out}")
+    stats = {"interactions": n_out, "users": len(users), "items": len(items), "rows_read": n_in,
+             "min_rating": min_rating, "missing_ts": n_no_ts, "adapter": adapter.name}
+    with open(args.out + ".stats.json", "w", encoding="utf-8") as f:
+        json.dump(stats, f, indent=2)
+    print(f"[prepare] adapter={adapter.name} rows in={n_in:,} kept={n_out:,} users={len(users):,} "
+          f"items={len(items):,} (min_rating={min_rating}) missing_ts={n_no_ts:,} -> {args.out}")
 
 
 if __name__ == "__main__":

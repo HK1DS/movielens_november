@@ -161,6 +161,38 @@ def llm_preflight(cfg):
     print(f"[preflight] LLM reachable ({cfg['llm'].get('base_url')}): {str(out).strip()[:40]!r} | {llm.keys.status()}")
 
 
+def scale_check(adapter, k, ds_cfg, prepared_csv, kcore_csv, run_dir):
+    """Compare the stage 0 / A sizes with the adapter's reference (an earlier trusted run on the
+    same raw data, e.g. the earlier MovieLens repo). Returns None when there is nothing to compare."""
+    ref = adapter.reference_stats(k)
+    if ref is None:
+        print(f"[scale] no reference sizes for adapter={adapter.name}, k={k} -> check skipped")
+        return None
+    if ds_cfg.get("min_rating") is not None:
+        print("[scale] dataset.min_rating is set; the reference keeps all ratings -> check skipped")
+        return None
+    got = {}
+    for name, path in (("prepared", prepared_csv + ".stats.json"), ("kcore", kcore_csv + ".stats.json")):
+        if os.path.exists(path):
+            got[name] = json.load(open(path, encoding="utf-8"))
+    if not got:
+        return None
+    ok = True
+    print(f"[scale] vs {ref.get('source', 'reference')}:")
+    for name, stats in got.items():
+        for key in ("interactions", "users", "items"):
+            exp, val = ref[name][key], stats.get(key)
+            ok &= val == exp
+            print(f"  {name:<9} {key:<13} {val if val is None else format(val, ','):>12} / {exp:>12,}  "
+                  f"{'OK' if val == exp else 'MISMATCH'}")
+    print("[scale] " + ("MATCH: same dataset size as the reference" if ok else
+                        "MISMATCH: different data than the reference (raw files / options?)"))
+    result = {"ok": bool(ok), "complete": len(got) == 2, "reference": ref, "got": got}
+    with open(os.path.join(run_dir, "scale_check.json"), "w", encoding="utf-8") as f:
+        json.dump(result, f, indent=2, default=str)
+    return result
+
+
 def stage_signature(inputs, extra=None):
     """Content hash of a stage's inputs (+ settings). A finished stage is skipped on
     re-run only while this signature is unchanged and its outputs exist."""
@@ -182,6 +214,8 @@ def main():
     ap.add_argument("--seed-cache-from", nargs="*", default=None,
                     help="run dirs whose step1 cache may be reused (default: the other split's dir + this split's pilot dir)")
     ap.add_argument("--yes", action="store_true", help="do not ask before paid LLM stages")
+    ap.add_argument("--ignore_scale_check", action="store_true",
+                    help="run paid stages even if the data sizes differ from the adapter's reference")
     ap.add_argument("--max_usd", type=float, default=None,
                     help="abort paid stages if the observed-rate estimate exceeds this")
     ap.add_argument("--redo", default="",
@@ -228,6 +262,8 @@ def main():
         sh([PY, "apply_k_core.py", "--interactions_in", args.interactions_in, "--k", str(k),
             "--out_dir", data_dir], env=env)
 
+    scale = scale_check(adapter, k, cfg["dataset"], args.interactions_in, inter_csv, run_dir)
+
     if "T" in steps and not done(atomic):
         if not has_timestamp(inter_csv):
             raise SystemExit(f"{inter_csv} has no timestamp column; the temporal splits need one "
@@ -239,6 +275,10 @@ def main():
     if "P" in steps and not done(profiles, prov, prov + ".meta.json"):
         sh([PY, "build_trainonly_profiles.py", "--split", split, "--inter", atomic,
             "--out_profiles", profiles, "--out_provenance", prov], env=env)
+
+    if ("B" in steps or "C" in steps) and scale is not None and not scale["ok"] and not args.ignore_scale_check:
+        raise SystemExit("[scale] the prepared data differ from the reference sizes (see above); aborting before "
+                         "any paid LLM call. Fix the raw files/options, or pass --ignore_scale_check on purpose.")
 
     est_all = None
     if "B" in steps or "C" in steps or "S" in steps:

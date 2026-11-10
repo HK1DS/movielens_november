@@ -103,3 +103,64 @@ def test_stages_0_to_P_on_ml25m_format(tmp_path):
     assert all(" | Frequent genres: " in t for t in texts)
     assert any("American President, The (1995)" in t for t in texts)
     assert set(p.item_profile) <= {f"{t} | {g}" for _, t, g in MOVIES}
+
+
+def _repo_copy(tmp_path):
+    import shutil
+    wd = tmp_path / "repo"
+    wd.mkdir()
+    for f in ("prepare_interactions.py", "apply_k_core.py", "make_temporal_inter.py", "build_trainonly_profiles.py",
+              "estimate_llm_cost.py", "run_pipeline.py", "config.yaml"):
+        shutil.copy(os.path.join(ROOT, f), wd)
+    for d in ("ikgr_core", "data_adapters", "prompts"):
+        shutil.copytree(os.path.join(ROOT, d), wd / d)
+    (wd / "ref_adapter.py").write_text(
+        "import json, os\n"
+        "from data_adapters.movielens import MovieLensAdapter\n"
+        "class RefAdapter(MovieLensAdapter):\n"
+        "    REFERENCE = json.loads(os.environ['TEST_REF'], object_hook=lambda d: {int(k) if k.isdigit() else k: v"
+        " for k, v in d.items()})\n", encoding="utf-8")
+    return wd
+
+
+def test_scale_check_matches_and_blocks_paid_stages(tmp_path):
+    import json as _json
+    wd = _repo_copy(tmp_path)
+    write_ml25m(wd / "raw" / "ml-25m")
+    cfg = yaml.safe_load(open(wd / "config.yaml", encoding="utf-8"))
+    cfg["dataset"]["adapter"] = "ref_adapter:RefAdapter"
+    yaml.safe_dump(cfg, open(wd / "config.yaml", "w", encoding="utf-8"), sort_keys=False)
+
+    def run(ref, *steps):
+        env = dict(os.environ, TEST_REF=_json.dumps(ref), PYTHONPATH=str(wd))
+        r = subprocess.run([sys.executable, "run_pipeline.py", "--k", "3", "--split", "TO", "--yes", *steps],
+                           cwd=wd, env=env, capture_output=True, text=True)
+        return r.returncode, r.stdout + r.stderr
+
+    # 1) build stage 0/A once with a placeholder reference, read the real sizes
+    placeholder = {"prepared": {"interactions": 0, "users": 0, "items": 0},
+                   "kcore": {"3": {"interactions": 0, "users": 0, "items": 0}}}
+    rc, out = run(placeholder, "--steps", "0A")
+    assert rc == 0, out[-2000:]
+    assert "[scale] MISMATCH" in out
+    prep = _json.load(open(wd / "data" / "interactions.csv.stats.json"))
+    kc = _json.load(open(wd / "data" / "kc_k3" / "interactions_k3.csv.stats.json"))
+    assert prep["items"] == 7                                         # 8 movies minus the no-genre one
+    # 2) wrong reference -> paid stage refused before any LLM call
+    rc, out = run(placeholder, "--steps", "B")
+    assert rc != 0 and "aborting before any paid LLM call" in out and "[preflight]" not in out
+    # 3) the real sizes as reference -> MATCH, guard passes (stop before B: no LLM here)
+    good = {"prepared": {k: prep[k] for k in ("interactions", "users", "items")},
+            "kcore": {"3": {k: kc[k] for k in ("interactions", "users", "items")}}}
+    rc, out = run(good, "--steps", "0A")
+    assert rc == 0 and "[scale] MATCH" in out, out[-2000:]
+    assert _json.load(open(wd / "run_k3_TO" / "scale_check.json"))["ok"] is True
+
+
+def test_movielens_reference_is_the_earlier_repo_k30():
+    a = get_adapter({"adapter": "movielens", "options": {}})
+    ref = a.reference_stats(30)
+    assert ref["kcore"] == {"interactions": 24_046_865, "users": 133_684, "items": 15_785}
+    assert ref["prepared"] == {"interactions": 24_973_468, "users": 162_541, "items": 54_479}
+    assert a.reference_stats(20) is None
+    assert get_adapter({"adapter": "movielens", "options": {"drop_no_genres": False}}).reference_stats(30) is None

@@ -75,6 +75,13 @@ class DatasetAdapter(ABC):
     def load_items(self, item_ids: Set[str]) -> Dict[str, ItemMeta]:
         """Return {item_id: ItemMeta} for the requested ids (missing ids may be absent)."""
 
+    def reference_stats(self, k: int) -> Optional[Dict]:
+        """Optional sizes an earlier, trusted run produced from the same raw data, e.g.
+        {"prepared": {"interactions": n, "users": u, "items": i}, "kcore": {"interactions": .., ...}}.
+        run_pipeline.py compares stage 0 / A outputs with it and blocks the paid stages on a mismatch.
+        Return None when there is no reference for this k / option set."""
+        return None
+
     def source_files(self) -> List[str]:
         """Raw files whose CONTENT feeds profiles / metadata KG. Hashed into the
         stage-D signature so a changed catalog rebuilds the KG packs."""
