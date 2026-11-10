@@ -1,0 +1,28 @@
+{
+  "step1": {
+    "pending_user_calls": 133200,
+    "pending_item_calls": 0,
+    "calls": 133200,
+    "tokens_in": 35196980,
+    "tokens_out": 10656000,
+    "usd_list_price": 11.67
+  },
+  "step2": {
+    "pending_user_calls": 133200,
+    "pending_item_calls": 15784,
+    "calls": 148984,
+    "tokens_in": 143297522,
+    "tokens_out": 7449200,
+    "usd_list_price": 25.96
+  },
+  "total": {
+    "calls": 282184,
+    "usd_list_price": 37.63,
+    "usd_observed_range": [
+      141.09,
+      172.13
+    ],
+    "unique_user_profiles": 133200,
+    "unique_item_profiles": 15784
+  }
+}

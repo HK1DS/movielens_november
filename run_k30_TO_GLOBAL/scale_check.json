@@ -1,0 +1,35 @@
+{
+  "ok": true,
+  "complete": true,
+  "reference": {
+    "prepared": {
+      "interactions": 24973468,
+      "users": 162541,
+      "items": 54479
+    },
+    "kcore": {
+      "interactions": 24046865,
+      "users": 133684,
+      "items": 15785
+    },
+    "source": "HK1DS/hk1ds_jwkim_movielens (ml-25m, k=30 final package)"
+  },
+  "got": {
+    "prepared": {
+      "interactions": 24973468,
+      "users": 162541,
+      "items": 54479,
+      "rows_read": 24973468,
+      "min_rating": null,
+      "missing_ts": 0,
+      "adapter": "movielens"
+    },
+    "kcore": {
+      "k": 30,
+      "interactions": 24046865,
+      "users": 133684,
+      "items": 15785,
+      "input": "C:\\Users\\jwkim\\OneDrive\\Desktop\\MovieLens\\data\\interactions.csv"
+    }
+  }
+}

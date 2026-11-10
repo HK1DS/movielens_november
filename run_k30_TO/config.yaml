@@ -1,0 +1,55 @@
+dataset:
+  adapter: movielens
+  options:
+    raw_dir: raw/ml-25m
+    drop_no_genres: true
+  min_rating: null
+  ts_clip: null
+paths:
+  input_csv: data/kc_k30/profiles_k30_TO.csv
+  profile_provenance: data/kc_k30/profile_provenance_k30_TO.csv.gz
+  workdir: run_k30_TO/
+  step1_output: run_k30_TO/step1_intents.csv
+  step2_output: run_k30_TO/step2_related_intents.csv
+  kg_triples: run_k30_TO/kg_triples.txt
+  inter_file: data/kc_k30/interactions_k30.csv
+  recbole_dump: run_k30_TO/recbole/
+  kg_pack: run_k30_TO/kg_pack.pt
+  meta_kg_pack: run_k30_TO/meta_kg_pack.pt
+llm:
+  base_url: https://bridge.luxiacloud.com/llm/openai/chat/completions/gpt-4o-mini
+  api_key: ${LUXIA_API_KEY}
+  model: llm
+  provider: luxia
+  temperature: 0.2
+  top_p: 0.95
+  max_tokens: 2048
+rag:
+  encoder: sentence-transformers/all-mpnet-base-v2
+  annoy_trees: 50
+  knn_k: 100
+  encoding_npy: run_k30_TO/intents_emb.npy
+  annoy_index: run_k30_TO/intents.ann
+  vocab_json: run_k30_TO/intent_vocab.json
+recbole:
+  model: IKGR
+  dataset: ikgr-custom
+  topk:
+  - 10
+  - 30
+  metrics:
+  - Recall
+  - MRR
+  - NDCG
+  - Hit
+  - Precision
+  epochs: 40
+  eval_step: 2
+  stopping_step: 3
+  valid_metric: NDCG@10
+  learning_rate: 0.001
+  reg_weight: 1.0e-06
+  lambda_mix: 0.1
+  embedding_size: 64
+  gcn_layers: 1
+  dropout: 0.1

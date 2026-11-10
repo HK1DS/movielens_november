@@ -222,6 +222,7 @@ run_k*/*
 !run_k*/llm_cost_estimate.json
 !run_k*/scale_check.json
 !run_k*/pilot_report.md
+!run_k*/llm_progress_step*.csv
 
 # TensorBoard run logs (RecBole) - noise, not tracked
 log_tensorboard/
