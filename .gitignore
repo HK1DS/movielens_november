@@ -229,3 +229,7 @@ log_tensorboard/
 
 # raw dataset files (download separately; GroupLens license: no redistribution)
 raw/
+
+# pipeline outputs (LLM caches, KG packs, checkpoints, results) -- large, regenerate with run_pipeline.py
+run/
+run_k*/
