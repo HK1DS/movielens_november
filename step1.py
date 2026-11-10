@@ -7,6 +7,7 @@ import re, ast, json
 import pandas as pd
 from tqdm import tqdm
 from ikgr_core.llm_client import AllKeysExhausted, LocalLLM
+from ikgr_core.rate_limit import SharedRateLimiter, backoff_with_jitter, retry_after_seconds
 from ikgr_core.utils import read_csv, write_csv, ensure_dir
 
 # Number of concurrent LLM requests for intent extraction.
@@ -16,6 +17,9 @@ MAX_WORKERS = int(os.environ.get("IKGR_STEP1_WORKERS", "8"))
 # Retry policy for transient API errors (429 rate limits, 5xx). Overridable for tests.
 LLM_MAX_RETRIES = int(os.environ.get("IKGR_LLM_MAX_RETRIES", "10"))
 LLM_RETRY_DELAY = float(os.environ.get("IKGR_LLM_RETRY_DELAY", "5"))
+# Full-cache rewrite interval (the cache reaches 100+ MB at ~150k profiles; every rewrite holds
+# the worker lock). Ctrl+C always saves immediately; a hard kill loses at most this many calls.
+CACHE_SAVE_EVERY = int(os.environ.get("IKGR_CACHE_SAVE_EVERY", "500"))
 
 def load_prompt(path: str) -> str:
     with open(path, "r", encoding="utf-8") as f:
@@ -80,30 +84,44 @@ def main():
         # mid-write cannot corrupt the resumable cache.
         tmp = cache_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(cache, f, ensure_ascii=False, indent=2)
+            json.dump(cache, f, ensure_ascii=False)
         os.replace(tmp, cache_path)
 
+    rate_limiter = SharedRateLimiter()
+
     def chat_with_retry(sys_prompt, prompt, max_retries=LLM_MAX_RETRIES, initial_delay=LLM_RETRY_DELAY):
+        # Shared pacing across workers (ikgr_core/rate_limit.py): honours Retry-After, adds jitter,
+        # and switches every worker to the stable interval after the first 429.
         delay = initial_delay
         for attempt in range(max_retries):
             try:
+                rate_limiter.acquire()
                 return llm.chat(sys_prompt, prompt).strip()
             except AllKeysExhausted:
                 raise                      # no point retrying: every API key is out of credit
             except requests.exceptions.HTTPError as e:
                 status = e.response.status_code if e.response is not None else "unknown"
                 if status == 429:
-                    print(f"\n[Rate Limit 429] Sleeping for {delay} seconds before retry (attempt {attempt+1}/{max_retries})...")
-                    time.sleep(delay)
-                    delay = min(delay * 2, 60)
+                    wait = max(delay, retry_after_seconds(e.response) or 0.0)
+                    switched = rate_limiter.defer_all(wait)
+                    sleep_for = backoff_with_jitter(wait)
+                    print(f"\n[Rate Limit 429] shared cooldown {wait:.1f}s; retrying in {sleep_for:.1f}s "
+                          f"(attempt {attempt+1}/{max_retries})...")
+                    if switched:
+                        print(f"[Rate Limit 429] all workers now paced at one request start per "
+                              f"{rate_limiter.min_interval_seconds:.2f}s")
+                    time.sleep(sleep_for)
                 else:
-                    print(f"\n[HTTP Error {status}] Retrying in {delay} seconds...")
-                    time.sleep(delay)
-                    delay = min(delay * 2, 60)
-            except Exception as e:
-                print(f"\n[Error] {e}. Retrying in {delay} seconds...")
-                time.sleep(delay)
+                    sleep_for = backoff_with_jitter(delay)
+                    print(f"\n[HTTP Error {status}] Retrying in {sleep_for:.1f} seconds...")
+                    time.sleep(sleep_for)
                 delay = min(delay * 2, 60)
+            except Exception as e:
+                sleep_for = backoff_with_jitter(delay)
+                print(f"\n[Error] {e}. Retrying in {sleep_for:.1f} seconds...")
+                time.sleep(sleep_for)
+                delay = min(delay * 2, 60)
+        rate_limiter.acquire()
         return llm.chat(sys_prompt, prompt).strip()
 
     # Extract unique profiles
@@ -118,7 +136,7 @@ def main():
 
     cache_lock = threading.Lock()
     failed = {"user": 0, "item": 0}
-    save_state = {"since_save": 0}
+    save_state = {"since_save": 0, "done": 0}
     keys_exhausted = threading.Event()
 
     def process(kind, prof, template):
@@ -152,7 +170,8 @@ def main():
         with cache_lock:
             cache[kind][key] = parsed
             save_state["since_save"] += 1
-            if save_state["since_save"] >= 50:
+            save_state["done"] += 1
+            if save_state["since_save"] >= CACHE_SAVE_EVERY:
                 save_cache()
                 save_state["since_save"] = 0
 
@@ -170,7 +189,14 @@ def main():
 
     if jobs:
         from ikgr_core.jobs import run_interruptible
+        _t0 = time.time()
         run_interruptible(process, jobs, MAX_WORKERS, "Extracting Intents", save_cache)
+        _dt = time.time() - _t0
+        print(f"[step1] throughput: calls={save_state['done']} seconds={_dt:.1f} "
+              f"rate={save_state['done'] / max(_dt, 1e-9):.2f}/s | keys: {llm.keys.status()}", flush=True)
+        with open(os.path.join(work, "step1_throughput.json"), "w", encoding="utf-8") as f:
+            json.dump({"calls": save_state["done"], "seconds": round(_dt, 2), "workers": MAX_WORKERS,
+                       "paced_interval_s": rate_limiter.min_interval_seconds}, f)
 
     save_cache()
 

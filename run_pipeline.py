@@ -180,7 +180,7 @@ def main():
     ap.add_argument("--interactions_in", default="data/interactions.csv")
     ap.add_argument("--dataset", default="ikgr-custom", help="RecBole dataset (atomic file) name")
     ap.add_argument("--seed-cache-from", nargs="*", default=None,
-                    help="run dirs whose step1 cache may be reused (default: the other split's dir)")
+                    help="run dirs whose step1 cache may be reused (default: the other split's dir + this split's pilot dir)")
     ap.add_argument("--yes", action="store_true", help="do not ask before paid LLM stages")
     ap.add_argument("--max_usd", type=float, default=None,
                     help="abort paid stages if the observed-rate estimate exceeds this")
@@ -245,7 +245,7 @@ def main():
         sources = args.seed_cache_from
         if sources is None:
             other = "TO_GLOBAL" if split == "TO" else "TO"
-            sources = [f"run_k{k}_{other}/"]
+            sources = [f"run_k{k}_{other}/", f"run_k{k}_{split}_pilot/"]   # + pilot_llm.py step1 results
         seed_step1_cache(run_dir, sources)
         est_json = os.path.join(run_dir, "llm_cost_estimate.json")
         sh([PY, "estimate_llm_cost.py", "--profiles", profiles, "--run_dir", run_dir, "--json_out", est_json], env=env)

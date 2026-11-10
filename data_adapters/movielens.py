@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MovieLens adapter -- SKELETON. Fill in the two TODO methods; nothing else in the
-pipeline needs to change (see data_adapters/base.py for the contract).
+MovieLens adapter (ml-25m). Contract: data_adapters/base.py.
 
 Dataset version (FIXED): MovieLens 25M -- the same version as the earlier MovieLens repo
 (github.com/HK1DS/hk1ds_jwkim_movielens, prepare_movielens.py, raw dir data/movielens/ml-25m).
@@ -17,65 +16,97 @@ Dataset version (FIXED): MovieLens 25M -- the same version as the earlier MovieL
   Do not swap in ml-32m / ml-latest / ml-1m: ids, sizes and time ranges differ, so results would
   no longer be comparable with the earlier repo.
 
-What the earlier repo did with ml-25m (reference / sanity check, not yet decided here):
-  - all ratings kept as implicit interactions (no rating threshold)
-  - movies with "(no genres listed)" dropped together with their ratings
-      -> 24,973,468 ratings | 162,541 users | 54,479 movies
-  - item profile text = "title | genres"; genres = the only metadata relation ("categories")
-  - k=30 core -> 133,684 users | 15,785 items | 24,046,865 interactions
-  (its user profiles = earliest 80% of each user's history; this repo replaces that with the
-   exact train-only profiles of build_trainonly_profiles.py, so profiles will NOT be identical)
+Choices (2026-11-10: same as the earlier repo, for comparability; change via config options)
+  - all ratings kept as implicit interactions      -> dataset.min_rating: null
+  - "(no genres listed)" movies dropped together with their ratings
+      -> 24,973,468 ratings | 162,541 users | 54,479 movies  (options.drop_no_genres: true)
+  - item profile text = "<title> | <genres>", e.g. "Toy Story (1995) | Adventure|Animation|Children|Comedy|Fantasy"
+  - genres = the only metadata-KG relation ("genre") and the only user-profile facet
+  - tags.csv / tag genome NOT used (all-time aggregates -> validation/test leakage)
+  Reference from the earlier repo: k=30 core -> 133,684 users | 15,785 items | 24,046,865 interactions.
+  User profiles are this repo's exact train-only profiles, so their TEXT differs from the earlier
+  repo's "earliest 80% of history" profiles (and so do the LLM intents).
 
-Decisions to make before filling in (they change results, so record them):
-  [ ] Scale. Full 25M at k=30 is ~134k users; stage B/C makes one LLM call per unique non-empty
-      profile (step1 + step2 each; the earlier repo's TO_GLOBAL run: ~113k profiles, ~188M tokens), and
-      LightGCN propagates the whole train graph every batch -> check `run_pipeline.py --steps 0ATPS`
-      cost estimate and GPU time before committing; raise --k or subsample users if needed.
-  [ ] Positive feedback. All ratings as implicit positives (earlier repo + Goodreads setup) or
-      rating >= 4? -> `dataset.min_rating` in config.yaml (applied in prepare_interactions.py).
-  [ ] "(no genres listed)" movies: drop (earlier repo) or keep without genre nodes.
-  [ ] Item text. movies.csv only has title + genres, so LLM item intents from it will mostly
-      restate the genres (= the genre metadata channel). Richer static text needs an external
-      source (e.g. TMDB overview via links.csv) -- cache it to a file and list it in source_files().
-  [ ] Tags. tags.csv / tag genome are aggregated over ALL time, i.e. they include validation/test
-      period behaviour. Either leave them out of item metadata, or rebuild them from train-period
-      rows only (TO: per user cut, TO_GLOBAL: global cut). Do not silently use them.
-  [ ] Timestamps. MovieLens timestamps are rating-entry times (users bulk-rate old movies at
-      sign-up). Ties are handled by ikgr_core/temporal_split.py; ts_clip is usually not needed.
+Open points (do not change silently)
+  - Item text is thin (title + genres): LLM item intents will largely restate the genres, i.e.
+    overlap with the genre metadata channel. Richer static text needs an external source
+    (e.g. TMDB overview via links.csv): cache it to a file and add it to source_files().
+  - Timestamps are rating-entry times (users bulk-rate old movies at sign-up). Ties are handled
+    by ikgr_core/temporal_split.py; ts_clip is not needed (all timestamps are valid epochs).
 """
+import csv
 import os
 
 from .base import DatasetAdapter, ItemMeta, MetaRelation, ProfileFacet  # noqa: F401
 
 
+NO_GENRES = "(no genres listed)"
+
+
+def _clean(text):
+    return " ".join(str(text or "").split())
+
+
 class MovieLensAdapter(DatasetAdapter):
     name = "movielens"
     recent_label = "Recently watched (newest first)"
-    # TODO(decide): placeholders. Relation names must match the keys load_items() fills.
-    profile_facets = [ProfileFacet(relation="genre", label="Frequent genres", top_n=10)]
+    profile_facets = [ProfileFacet(relation="genre", label="Frequent genres", top_n=10, show_counts=True)]
     meta_relations = [MetaRelation(name="genre")]
     ts_clip = None
 
-    def __init__(self, raw_dir="raw/ml-25m", **opts):
+    def __init__(self, raw_dir="raw/ml-25m", drop_no_genres=True):
         self.raw_dir = raw_dir
-        self.opts = opts
+        self.drop_no_genres = bool(drop_no_genres)
+        self._movies = None
 
     def _path(self, name):
         return os.path.join(self.raw_dir, name)
 
+    def _require(self, name):
+        p = self._path(name)
+        if not os.path.exists(p):
+            raise FileNotFoundError(
+                f"{p} not found. Download https://files.grouplens.org/datasets/movielens/ml-25m.zip "
+                f"and unzip it so that {self._path('ratings.csv')} exists "
+                f"(scripts/run_intent_augmentation.ps1 does this on Windows).")
+        return p
+
+    def _load_movies(self):
+        """{movieId: (title, [genres], raw genres string)} for every movie in movies.csv."""
+        if self._movies is None:
+            movies = {}
+            with open(self._require("movies.csv"), encoding="utf-8", newline="") as f:
+                for row in csv.DictReader(f):
+                    genres_raw = _clean(row.get("genres"))
+                    genres = [] if genres_raw == NO_GENRES else [g for g in genres_raw.split("|") if g]
+                    movies[str(row["movieId"])] = (_clean(row.get("title")), genres, genres_raw)
+            self._movies = movies
+        return self._movies
+
     def iter_interactions(self):
-        # TODO: yield (str(userId), str(movieId), float(rating), float(timestamp)) from
-        #       raw/ml-25m/ratings.csv. Stream the file; 25M rows do not need pandas here.
-        #       Apply the "(no genres listed)" decision here too if those movies are dropped.
-        raise NotImplementedError("MovieLensAdapter.iter_interactions: see the TODO in data_adapters/movielens.py")
+        movies = self._load_movies()
+        skip = {m for m, (_, genres, _) in movies.items() if not genres} if self.drop_no_genres else set()
+        with open(self._require("ratings.csv"), encoding="utf-8", newline="") as f:
+            r = csv.reader(f)
+            header = next(r)
+            iu, im, ir, it = (header.index(c) for c in ("userId", "movieId", "rating", "timestamp"))
+            for row in r:
+                if not row or row[im] in skip:
+                    continue
+                yield row[iu], row[im], float(row[ir]), float(row[it])
 
     def load_items(self, item_ids):
-        # TODO: return {movieId: ItemMeta(title=..., profile=..., relations={"genre": [...], ...})}
-        #       for movieId in item_ids. title = display string for user profiles (e.g. "Toy Story (1995)"),
-        #       profile = static item text for LLM item intents, relations = metadata-KG nodes.
-        raise NotImplementedError("MovieLensAdapter.load_items: see the TODO in data_adapters/movielens.py")
+        movies = self._load_movies()
+        out = {}
+        for iid in item_ids:
+            m = movies.get(str(iid))
+            if m is None:
+                continue
+            title, genres, genres_raw = m
+            profile = " | ".join(p for p in (title, genres_raw) if p)      # earlier repo's item text
+            out[str(iid)] = ItemMeta(title=title, profile=profile, relations={"genre": genres})
+        return out
 
     def source_files(self):
         # Files whose content feeds profiles / the metadata KG (hashed into the stage-D signature).
-        names = ("movies.csv",)
-        return [self._path(n) for n in names if os.path.exists(self._path(n))]
+        return [self._path(n) for n in ("movies.csv",) if os.path.exists(self._path(n))]

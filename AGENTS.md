@@ -22,6 +22,9 @@
 ## 진행 기록
 - 2026-11-10: Goodreads 레포(`졸작_11월/Goodreads_experiment-main`)에서 아키텍처 뼈대 이식.
   데이터셋 버전은 **MovieLens 25M (`ml-25m`)** 으로 고정 — 이전 MovieLens 레포(HK1DS/hk1ds_jwkim_movielens)와 동일.
-  `data_adapters/movielens.py`는 아직 TODO.
+  (어댑터는 같은 날 아래에서 구현)
 - 2026-11-10: Luxia API 키 여러 개 + 소진 시 자동 교체(`ikgr_core/key_pool.py`). 전체 소진이면 step1/2가 exit 4로 중단 후 재실행 시 이어서.
   Luxia의 실제 소진 응답 형식은 아직 미확인 — 첫 소진 때 `[llm] luxia HTTP ...` 로그를 보고 필요하면 패턴 보강.
+- 2026-11-10: MovieLens 어댑터 구현 — 이전 레포와 같은 선택(평점 전부 implicit, `(no genres listed)` 제외,
+  item text `title | genres`, genre만 메타/facet, 태그 미사용). Luxia 공유 페이싱(`ikgr_core/rate_limit.py`, 이전 레포에서 이식;
+  시작은 무제한, 첫 429에 1초 간격), 캐시 저장 500회 간격, `pilot_llm.py` + `scripts\intent_pilot.bat` / `intent_full.bat`.

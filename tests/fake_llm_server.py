@@ -9,6 +9,7 @@ taken from the Luxia `apikey` header or `Authorization: Bearer`):
   FAKE_LLM_EXHAUSTED_KEYS="k1,k2"   keys that are out of credit from the start
   FAKE_LLM_EXHAUSTED_STYLE          how "out of credit" looks: 402 | 429_quota | 200_error | 401
   FAKE_LLM_429_KEYS="k1"            keys that always get a plain HTTP 429 (rate limit, empty body)
+  FAKE_LLM_429_FIRST=N              the first N requests (any key) get HTTP 429 (+ Retry-After: FAKE_LLM_RETRY_AFTER)
 KEY_LOG records the key of every request (successful or not)."""
 import hashlib
 import json
@@ -23,12 +24,14 @@ STOP = {"the", "by", "and", "of", "a", "recently", "consumed", "newest", "first"
 CALLS = {"n": 0}
 KEY_LOG = []
 _KEY_USED = {}
+_REQ = {"n": 0}
 _LOCK = threading.Lock()
 
 
 def reset():
     with _LOCK:
         CALLS["n"] = 0
+        _REQ["n"] = 0
         KEY_LOG.clear()
         _KEY_USED.clear()
 
@@ -82,7 +85,9 @@ class H(BaseHTTPRequestHandler):
                 budgets[k.strip()] = int(n)
         with _LOCK:
             KEY_LOG.append(key)
-            if key in _set("FAKE_LLM_429_KEYS"):
+            _REQ["n"] += 1
+            first_429 = _REQ["n"] <= int(os.environ.get("FAKE_LLM_429_FIRST", "0") or 0)
+            if first_429 or key in _set("FAKE_LLM_429_KEYS"):
                 verdict = "429"
             elif key in _set("FAKE_LLM_EXHAUSTED_KEYS") or (key in budgets and _KEY_USED.get(key, 0) >= budgets[key]):
                 verdict = "exhausted"
@@ -91,7 +96,10 @@ class H(BaseHTTPRequestHandler):
                 if key in budgets:
                     _KEY_USED[key] = _KEY_USED.get(key, 0) + 1
         if verdict == "429":
-            self.send_response(429); self.send_header("Content-Length", "0"); self.end_headers()
+            self.send_response(429)
+            if os.environ.get("FAKE_LLM_RETRY_AFTER"):
+                self.send_header("Retry-After", os.environ["FAKE_LLM_RETRY_AFTER"])
+            self.send_header("Content-Length", "0"); self.end_headers()
             return
         if verdict == "exhausted":
             code, obj = _exhausted_response()

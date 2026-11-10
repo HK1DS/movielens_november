@@ -100,44 +100,64 @@ scripts/setup_venv.ps1         Windows GPU venv (기존 goodreads-ikgr venv 재�
 (유저가 단 태그, 리뷰, 인기 shelf 카운트 등)는 검증/테스트 기간 행동을 포함한다. 쓰려면 train 구간으로
 다시 만들거나, 최소한 그 결정을 기록해 둔다. 누수 가드는 **유저 프로필** 쪽만 검사하고 아이템 메타데이터는 검사하지 않는다.
 
-### MovieLens TODO (`data_adapters/movielens.py`)
+### MovieLens 어댑터 (`data_adapters/movielens.py`) — 결정 사항
 
-버전은 **ml-25m 고정**(평점 25,000,095 · 유저 162,541 · 영화 62,423). 이전 레포(`hk1ds_jwkim_movielens`의
-`prepare_movielens.py`)가 같은 데이터로 한 선택은 아래와 같고, 재현 확인용 기준값으로 쓰면 된다
-(여기서 아직 확정한 건 아님):
+버전은 **ml-25m 고정**(평점 25,000,095 · 유저 162,541 · 영화 62,423). 2026-11-10에 이전 레포
+(`hk1ds_jwkim_movielens`의 `prepare_movielens.py`)와 **같은 선택**으로 구현했다(비교 가능성 우선):
 
-| 항목 | 이전 레포 |
-|---|---|
-| positive | 모든 평점을 implicit interaction으로 유지 (threshold 없음) |
-| `(no genres listed)` 영화 | 평점째 제외 → 평점 24,973,468 · 유저 162,541 · 영화 54,479 |
-| 아이템 텍스트 / 메타 | `"title \| genres"` / 장르만 메타 relation(`categories`) |
-| k=30 core | 유저 133,684 · 아이템 15,785 · 상호작용 24,046,865 |
-| 유저 프로필 | 유저별 이력 앞 80% (이 레포는 정확한 train-only 프로필로 대체 → 프로필 텍스트는 달라짐) |
+| 항목 | 선택 | 바꾸려면 |
+|---|---|---|
+| positive | 모든 평점을 implicit interaction으로 유지 | `dataset.min_rating` |
+| `(no genres listed)` 영화 | 평점째 제외 → 평점 24,973,468 · 유저 162,541 · 영화 54,479 | `options.drop_no_genres: false` |
+| 아이템 텍스트 | `"title \| genres"` (예: `Toy Story (1995) \| Adventure\|Animation\|…`) | 어댑터 `load_items` |
+| 메타 KG / 유저 프로필 facet | `genre` 하나 / `Frequent genres: Drama (12), …` | 어댑터 클래스 속성 |
+| 태그 (`tags.csv`, genome) | **사용 안 함** (전 기간 집계 → 누수) | — |
+| 참고: 이전 레포 k=30 core | 유저 133,684 · 아이템 15,785 · 상호작용 24,046,865 | — |
 
-- [ ] 규모: k=30 전체면 유저 약 13만. B/C 단계는 고유 프로필당 LLM 호출 1회씩(이전 레포 TO_GLOBAL: 프로필 약 11.3만 개,
-      토큰 약 1.88억)이고 LightGCN은 배치마다 그래프 전체를 전파한다. `--steps 0ATPS`로 비용부터 보고, 필요하면 k를 올리거나 유저 샘플링.
-- [ ] positive 정의: 모든 평점을 implicit positive로 볼지(이전 레포·Goodreads 방식), rating ≥ 4만 볼지 → `dataset.min_rating`.
-- [ ] `(no genres listed)` 영화: 이전 레포처럼 뺄지, 장르 노드 없이 남길지.
-- [ ] 아이템 텍스트: `movies.csv`엔 제목+장르뿐이라 LLM 아이템 intent가 장르를 되풀이할 가능성이 크다
-      (= 메타 KG의 genre 채널과 중복). intent 채널을 의미 있게 하려면 외부 정적 텍스트(예: `links.csv` → TMDB 줄거리)가 필요.
-- [ ] 태그: `tags.csv`와 tag genome은 전 기간 집계라 위 누수 규칙에 걸린다. 빼거나 train 구간으로 재구성.
-- [ ] timestamp: MovieLens는 "평점 입력 시각"이라 가입 직후 몰아서 평가한 구간이 많다. 동점은 split 재현이 처리하지만,
-      TO의 "최근 소비" 의미가 Goodreads(읽은 날짜)와 다르다는 점은 해석할 때 감안.
-- [ ] `prompts/step1_intents.txt` 문구를 영화 도메인에 맞게.
+유저 프로필은 이 레포의 정확한 train-only 프로필이라 이전 레포("이력 앞 80%")와 텍스트·intent가 다르다.
+
+남은 우려(조용히 바꾸지 말 것):
+- 아이템 텍스트가 제목+장르뿐이라 LLM 아이템 intent가 장르를 되풀이할 가능성이 크다(= genre 메타 채널과 중복).
+  intent 채널을 의미 있게 하려면 외부 정적 텍스트(예: `links.csv` → TMDB 줄거리)가 필요. 파일럿 리포트의 샘플로 먼저 확인.
+- timestamp는 "평점 입력 시각"이라 가입 직후 몰아서 평가한 구간이 많다. TO의 "최근 소비" 의미가 Goodreads와 다르다.
+- `prompts/step1_intents.txt`는 아직 범용 문구다(영화 도메인용으로 다듬을지 파일럿 결과 보고 결정).
 
 ## 5. 실행 (Windows, 기존 GPU 환경)
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\setup_venv.ps1     # 기존 %USERPROFILE%\.venvs\goodreads-ikgr 재사용
-copy .env.example .env                                              # LUXIA API 키 입력 (여러 개 가능, 아래 참고)
-```
+준비: `.env`에 Luxia 키(아래 "키 여러 개" 참고). Python은 기존 `%USERPROFILE%\.venvs\goodreads-ikgr`를 그대로 쓴다
+(없으면 스크립트가 `scripts\setup_venv.ps1`로 만든다).
+
+**intent augmentation (LLM 단계 B/C)** — 탐색기에서 더블클릭:
+
+| 파일 | 하는 일 |
+|---|---|
+| `scripts\intent_pilot.bat` | ml-25m 다운로드·압축해제(없으면) → 무료 준비 `0ATPS` → **파일럿**: 실제 프로필 300명+아이템 100개(~800회 호출)로 Luxia 처리속도를 재서 전체 소요시간을 외삽하고, intent 샘플을 `run_k30_TO_pilot\pilot_report.md`에 남김 |
+| `scripts\intent_full.bat` | (준비가 끝났으면 건너뜀) → 전체 step1·step2 + KG pack(D). 첫 유료 호출 전에 비용 추정과 y/N 확인 |
+
+둘 다 Ctrl+C로 멈추고 같은 파일을 다시 실행하면 이어서 한다. 파일럿의 step1 결과는 본 실행이 재사용한다.
+
+**소요 시간 (k=30, TO)** — 호출 수 ≈ (유저 ~13.4만 + 아이템 ~1.6만) × 2단계 ≈ **30만 회**:
+
+| Luxia 처리속도 | 근거 | 전체 B/C |
+|---|---|---|
+| ~4.8 회/초 (동시 8, 제한 없음) | 2026-11 Goodreads step2 실측(15,198회/53분) | **약 17시간** |
+| ~1 회/초 (429 후 1초 간격) | 2026-07 이전 MovieLens 레포에서 Luxia가 동시 8에 429 → 1초 페이싱 | **약 3.5일** |
+
+어느 쪽인지는 계정 한도에 달려 있어서 파일럿 리포트의 `projected`가 실제 값이다. 무료 준비(0ATPS)는 25M 행 처리로 약 15–30분,
+step2 첫 실행은 mpnet 인코더(~420MB) 다운로드가 붙는다. 비용은 `S` 단계가 계산한다(Goodreads 관측 단가 기준 $0.50–0.61/1천 회 → 30만 회면 약 $150–180, 정가 기준은 그보다 낮음).
+
+직접 실행할 때:
 
 ```bash
 python run_pipeline.py --k 30 --split TO --steps 0ATPS        # 무료 준비 + LLM 비용 추정
-python run_pipeline.py --k 30 --split TO --steps BCDER        # LLM(확인 프롬프트) → KG → 학습/평가 → 리포트
-python run_pipeline.py --k 30 --split TO --steps ER --seeds 2021,2022 --specs IKGR_lgcn_dyn,LightGCN
+python pilot_llm.py --k 30 --split TO                          # 파일럿 (처리속도·소요시간·샘플)
+python run_pipeline.py --k 30 --split TO --steps BCD           # LLM(확인 프롬프트) → KG pack
+python run_pipeline.py --k 30 --split TO --steps ER --seeds 2020 --specs IKGR_lgcn_dyn,LightGCN
 python paired_compare.py --run_dir run_k30_TO --split TO --a IKGR_lgcn_dyn --b LightGCN IKGR_lgcn_dyn_nointent --by_activity
 ```
+
+LLM 속도 관련 환경변수: `IKGR_STEP1_WORKERS` / `IKGR_STEP2_WORKERS`(기본 8), `IKGR_LLM_MIN_INTERVAL_SECONDS`(처음부터 요청 간격, 기본 0),
+`IKGR_LLM_429_MIN_INTERVAL_SECONDS`(첫 429 이후 전 워커 공통 간격, 기본 1.0), `IKGR_CACHE_SAVE_EVERY`(캐시 저장 간격, 기본 500회).
 
 중단/재개는 Goodreads 레포와 같다: Ctrl+C 후 같은 명령을 다시 실행하면 0/A/T/P는 산출물이 있으면 건너뛰고,
 B/C는 LLM 캐시에 없는 프로필만 호출하고, B/C/D는 입력 해시가 같으면 통째로 건너뛰고(`--redo D` 등으로 강제),

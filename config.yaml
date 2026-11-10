@@ -5,13 +5,14 @@
 dataset:
   # Dataset adapter (data_adapters/__init__.py REGISTRY key, or "package.module:ClassName").
   # Everything dataset-specific (raw files, item metadata, user-profile facets, metadata-KG
-  # relations) lives in the adapter. The MovieLens adapter is a skeleton: fill in its TODOs first.
+  # relations) lives in the adapter (data_adapters/movielens.py).
   # Dataset version is FIXED to MovieLens 25M (ml-25m), the same version as
   # github.com/HK1DS/hk1ds_jwkim_movielens. https://files.grouplens.org/datasets/movielens/ml-25m.zip
   # -> unzip so that raw/ml-25m/ratings.csv and raw/ml-25m/movies.csv exist (raw/ is git-ignored).
   adapter: movielens
   options:
     raw_dir: raw/ml-25m
+    drop_no_genres: true              # earlier repo: "(no genres listed)" movies dropped with their ratings
   min_rating: null                    # e.g. 4.0 keeps only ratings >= 4 as positives (prepare_interactions.py)
   ts_clip: null                       # e.g. ["1995-01-01", "2024-12-31"]; null = adapter default (none)
 
