@@ -220,6 +220,8 @@ run_k*/*
 !run_k*/report_*.md
 !run_k*/config.yaml
 !run_k*/llm_cost_estimate.json
+!run_k*/scale_check.json
+!run_k*/pilot_report.md
 
 # TensorBoard run logs (RecBole) - noise, not tracked
 log_tensorboard/
@@ -229,7 +231,3 @@ log_tensorboard/
 
 # raw dataset files (download separately; GroupLens license: no redistribution)
 raw/
-
-# pipeline outputs (LLM caches, KG packs, checkpoints, results) -- large, regenerate with run_pipeline.py
-run/
-run_k*/
