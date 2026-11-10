@@ -72,6 +72,10 @@ def sh(cmd, env=None):
             p.wait()
         raise SystemExit("[interrupt] stopped. Re-run the same command to resume.")
     dt = round(time.time() - t0, 1)
+    if rc == 5:
+        print(f"\n[PAUSE] ({dt}s) time budget (--max_hours) or STOP file reached in {' '.join(cmd[1:])}; the LLM cache is "
+              f"saved. Re-run the same command (optionally with a new --max_hours) to continue.", flush=True)
+        raise SystemExit(5)
     if rc == 4:
         raise SystemExit(f"[STOP] ({dt}s) all LLM API keys are exhausted: {' '.join(cmd)}\n"
                          f"  -> add/recharge keys in .env (LUXIA_API_KEY_2=..., or LUXIA_API_KEYS=k1,k2) "
@@ -214,6 +218,10 @@ def main():
     ap.add_argument("--seed-cache-from", nargs="*", default=None,
                     help="run dirs whose step1 cache may be reused (default: the other split's dir + this split's pilot dir)")
     ap.add_argument("--yes", action="store_true", help="do not ask before paid LLM stages")
+    ap.add_argument("--max_hours", type=float, default=None,
+                    help="time budget for the paid stages B/C: no new LLM call starts after it; the run pauses "
+                         "(exit 5) with the cache saved and the same command resumes. Progress per minute is "
+                         "logged to run_k{K}_{SPLIT}/llm_progress_step{1,2}.csv")
     ap.add_argument("--ignore_scale_check", action="store_true",
                     help="run paid stages even if the data sizes differ from the adapter's reference")
     ap.add_argument("--max_usd", type=float, default=None,
@@ -238,6 +246,19 @@ def main():
     run_dir = f"run_k{k}_{split}/"
     ds = args.dataset
     env = dict(os.environ, IKGR_CONFIG=cfg_path)
+    if args.max_hours:
+        env["IKGR_LLM_DEADLINE"] = str(time.time() + args.max_hours * 3600)
+        print(f"[budget] paid stages stop starting new calls at "
+              f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(float(env['IKGR_LLM_DEADLINE'])))} "
+              f"({args.max_hours:g} h)")
+    stop_path = os.path.abspath(os.path.join(run_dir, "STOP"))
+    env["IKGR_LLM_STOP_FILE"] = stop_path
+    if "B" in steps or "C" in steps:
+        if os.path.exists(stop_path):
+            os.remove(stop_path)
+            print(f"[stop] removed an old {stop_path}")
+        print(f"[stop] graceful pause any time: create {stop_path} (scripts\\intent_stop.bat); "
+              f"the cache is saved and the same command resumes")
     inter_csv = f"{data_dir}/interactions_k{k}.csv"
     atomic = f"{data_dir}/{ds}/{ds}.inter"
     profiles = cfg["paths"]["input_csv"]

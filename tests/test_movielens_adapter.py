@@ -99,10 +99,53 @@ def test_stages_0_to_P_on_ml25m_format(tmp_path):
     assert "adapter=movielens" in out
     p = pd.read_csv(tmp_path / "prof.csv", dtype=str, keep_default_na=False)
     texts = [t for t in p.user_profile if t]
-    assert texts and all(t.startswith("Recently watched (newest first): ") for t in texts)
+    assert texts and all(t.startswith("Favorite movies (highest rated first): ") for t in texts)
     assert all(" | Frequent genres: " in t for t in texts)
     assert any("American President, The (1995)" in t for t in texts)
     assert set(p.item_profile) <= {f"{t} | {g}" for _, t, g in MOVIES}
+
+    # independent re-computation: whole safe-train history, titles by rating desc then newest first
+    from ikgr_core.temporal_split import assign_phases, read_atomic_inter
+    df = read_atomic_inter(str(inter))
+    _, safe = assign_phases(df, "TO")
+    tr = df[safe].copy()
+    tr["_row"] = range(len(tr))
+    title = {m: t for m, t, _ in MOVIES}
+    genres = {m: g.split("|") for m, _, g in MOVIES}
+    prof = dict(zip(p.user_id, p.user_profile))
+    for uid, g in tr.groupby("user_id", observed=True):
+        g = g.sort_values(["rating", "timestamp", "_row"], ascending=False)
+        want = "; ".join(title[str(i)] for i in g["item_id"].tolist()[:15])
+        got = prof[str(uid)].split(" | Frequent genres: ")[0].split(": ", 1)[1]
+        assert got == want, (uid, got, want)
+        cnt = {}
+        for i in g["item_id"].astype(str):
+            for v in genres[i]:
+                cnt[v] = cnt.get(v, 0) + 1
+        assert sum(int(x.rsplit("(", 1)[1].rstrip(")")) for x in
+                   prof[str(uid)].split(" | Frequent genres: ")[1].split(", ")) == sum(
+                       sorted(cnt.values(), reverse=True)[:10])
+    prov = pd.read_csv(tmp_path / "prov.csv.gz", dtype=str)
+    assert len(prov) == len(tr)                                   # whole history = provenance
+    meta = yaml.safe_load(open(str(tmp_path / "prov.csv.gz") + ".meta.json", encoding="utf-8"))
+    assert meta["title_order"] == "rating" and meta["title_n"] == 15 and meta["profile_window"] is None
+
+
+def test_structured_profile_rating_order_and_window():
+    from build_trainonly_profiles import structured_profile
+    from data_adapters.base import ItemMeta, ProfileFacet
+    meta = {i: ItemMeta(title=f"T{i}", relations={"genre": [f"g{i}", "common"]}) for i in "abcdef"}
+    fac = [ProfileFacet(relation="genre", label="G", show_counts=True)]
+    items = list("abcdef")                      # newest first
+    ratings = [3.0, 5.0, 3.0, 5.0, 1.0, 4.0]
+    text, used = structured_profile(items, meta, fac, set(), "Fav", 4, None, 0, ratings=ratings,
+                                    title_order="rating")
+    assert text.startswith("Fav: Tb; Td; Tf; Ta | G: common (6)")    # ties keep newest first
+    assert used == items
+    text, used = structured_profile(items, meta, fac, {("genre", "common")}, "Rec", 2, 3, 0, ratings=ratings)
+    assert text == "Rec: Ta; Tb | G: ga (1), gb (1), gc (1)" and used == list("abc")
+    text, _ = structured_profile(items, meta, fac, set(), "Fav", 2, 3, 0, ratings=ratings, title_order="rating")
+    assert text.startswith("Fav: Tb; Ta |")                     # rating order inside the window only
 
 
 def _repo_copy(tmp_path):

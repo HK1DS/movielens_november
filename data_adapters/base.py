@@ -17,7 +17,11 @@ An adapter answers three questions:
         relations  {relation_name: [node keys]} for the heterogeneous metadata KG
                    (stage D, build_meta_kg.py) and for user-profile facets (stage P)
   3. how user profiles and the metadata KG are shaped:
-        recent_label     header of the "recent items" part of a user profile
+        recent_label     header of the title list of a user profile
+        title_order      "recent" (newest first) or "rating" (highest rated first, ties newest first)
+        title_n          how many titles the list shows
+        profile_window   newest-N safe-train rows a profile is built from (None = whole train history);
+                         titles are picked from this window and facets are counted over it
         profile_facets   which relations are aggregated into a user profile
         meta_relations   which relations become metadata-KG node types
         ts_clip          optional (lo, hi) clamp window for timestamps (YYYY-MM-DD)
@@ -62,6 +66,9 @@ class MetaRelation:
 class DatasetAdapter(ABC):
     name: str = "base"
     recent_label: str = "Recent items (newest first)"
+    title_order: str = "recent"
+    title_n: int = 10
+    profile_window: Optional[int] = 50
     profile_facets: List[ProfileFacet] = []
     meta_relations: List[MetaRelation] = []
     ts_clip: Optional[Tuple[str, str]] = None

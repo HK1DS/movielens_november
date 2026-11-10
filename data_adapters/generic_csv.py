@@ -18,6 +18,9 @@ config.yaml
       relations: [{name: genre}, {name: tag, max_per_item: 15, min_df: 5}]
       facets: [{relation: genre, label: Frequent genres, top_n: 10}]
       recent_label: Recent items (newest first)
+      title_order: recent        # or rating (highest rated first, ties newest first)
+      title_n: 10
+      profile_window: 50         # newest-N train rows per user; null = whole train history
       ts_clip: ["2006-01-01", "2017-12-31"]      # optional
 """
 import csv
@@ -32,7 +35,8 @@ def _clean(text):
 
 class GenericCSVAdapter(DatasetAdapter):
     def __init__(self, interactions, items, relations=(), facets=(), recent_label=None,
-                 ts_clip=None, multi_sep="|", name="csv"):
+                 ts_clip=None, multi_sep="|", name="csv", title_order=None, title_n=None,
+                 profile_window="default"):
         self.name = name
         self.interactions_path = interactions
         self.items_path = items
@@ -42,6 +46,12 @@ class GenericCSVAdapter(DatasetAdapter):
         self.profile_facets = [f if isinstance(f, ProfileFacet) else ProfileFacet(**f) for f in facets]
         if recent_label:
             self.recent_label = recent_label
+        if title_order:
+            self.title_order = title_order
+        if title_n:
+            self.title_n = int(title_n)
+        if profile_window != "default":
+            self.profile_window = None if profile_window in (None, 0) else int(profile_window)
         self.ts_clip = tuple(ts_clip) if ts_clip else None
 
     def iter_interactions(self):

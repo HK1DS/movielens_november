@@ -22,6 +22,9 @@ Choices (2026-11-10: same as the earlier repo, for comparability; change via con
       -> 24,973,468 ratings | 162,541 users | 54,479 movies  (options.drop_no_genres: true)
   - item profile text = "<title> | <genres>", e.g. "Toy Story (1995) | Adventure|Animation|Children|Comedy|Fantasy"
   - genres = the only metadata-KG relation ("genre") and the only user-profile facet
+  - user profile (2026-11-10, differs from the earlier repo): the user's 15 highest-rated titles from the
+    WHOLE train-only history (ties: newest first) + genre counts over that whole history, e.g.
+    "Favorite movies (highest rated first): Heat (1995); ... | Frequent genres: Drama (412), Comedy (300), ..."
   - tags.csv / tag genome NOT used (all-time aggregates -> validation/test leakage)
   Reference from the earlier repo: k=30 core -> 133,684 users | 15,785 items | 24,046,865 interactions.
   User profiles are this repo's exact train-only profiles, so their TEXT differs from the earlier
@@ -49,7 +52,14 @@ def _clean(text):
 
 class MovieLensAdapter(DatasetAdapter):
     name = "movielens"
-    recent_label = "Recently watched (newest first)"
+    # MovieLens timestamps are rating-ENTRY times: many users rate hundreds of films in one sitting,
+    # so their "newest 50" is an arbitrary (often alphabetical) batch. Explicit ratings are the
+    # stronger taste signal, and recency is modelled separately (timestamps -> recency channel).
+    # -> top-rated titles from the whole train history + genre distribution of that history.
+    recent_label = "Favorite movies (highest rated first)"
+    title_order = "rating"
+    title_n = 15
+    profile_window = None
     profile_facets = [ProfileFacet(relation="genre", label="Frequent genres", top_n=10, show_counts=True)]
     meta_relations = [MetaRelation(name="genre")]
     ts_clip = None

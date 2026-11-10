@@ -20,10 +20,15 @@ of the config). Item profiles are the adapter's static item text (first
 --item_max_text_len chars), so item intents are split-independent and their LLM
 cache can be shared across splits.
 
-Structured user profile (aggregated over the user's most recent --agg_n safe items):
+Structured user profile, shaped by the adapter (data_adapters/base.py; CLI flags override):
   "<adapter.recent_label>: <title>; <title>; ... | <facet.label>: v1, v2, ... | ..."
-  recent titles = newest --recent_n items; one facet line per adapter.profile_facets entry.
+  window  = the user's newest adapter.profile_window safe-train rows (None = whole train history;
+            --agg_n, 0 = whole history)
+  titles  = first adapter.title_n items of the window (--recent_n) in adapter.title_order (--title_order):
+            "recent" newest first, or "rating" highest rated first (ties newest first)
+  facets  = one line per adapter.profile_facets entry, counted over the whole window.
   Facet values present on more than --ubiquitous_df of all items are dropped (no signal).
+  Provenance = every (user, item) of the window (all of them feed the facet counts).
 
 Usage
   python build_trainonly_profiles.py --split TO \
@@ -43,32 +48,56 @@ from data_adapters import load_adapter
 from ikgr_core.temporal_split import SPLITS, assign_phases, read_atomic_inter
 
 
-def structured_profile(items_newest_first, meta, facets, ubiquitous, recent_label,
-                       recent_n, agg_n, max_len):
-    """Return (text, contributing_item_ids)."""
-    agg = items_newest_first[:agg_n]
-    if not agg:
-        return "", []
-    recent = []
-    for iid in agg[:recent_n]:
-        m = meta.get(iid)
-        if m is not None and m.title:
-            recent.append(m.title)
-    parts = []
-    if recent:
-        parts.append(f"{recent_label}: " + "; ".join(recent))
+def facet_index(meta, facets, ubiquitous):
+    """Per facet: {item_id: facet values that count} (primary_only and ubiquitous filters applied)."""
+    out = []
     for fc in facets:
-        cnt = Counter()
-        for iid in agg:
-            m = meta.get(iid)
-            if m is None:
-                continue
+        d = {}
+        for iid, m in meta.items():
             vals = m.relations.get(fc.relation, [])
             if fc.primary_only:
                 vals = vals[:1]
-            for v in vals:
-                if (fc.relation, v) not in ubiquitous:
-                    cnt[v] += 1
+            vals = tuple(v for v in vals if (fc.relation, v) not in ubiquitous)
+            if vals:
+                d[iid] = vals
+        out.append(d)
+    return out
+
+
+def structured_profile(items_newest_first, meta, facets, ubiquitous, recent_label,
+                       recent_n, agg_n, max_len, ratings=None, title_order="recent", fidx=None):
+    """Return (text, contributing_item_ids).
+
+    items_newest_first: the user's safe-train items, newest first (`ratings` aligned with it).
+    Window = newest agg_n items (None/0 = all). Titles = first recent_n items of the window in
+    title_order ("recent": newest first; "rating": highest rating first, ties keep newest first).
+    Facets are counted over the whole window."""
+    agg = list(items_newest_first[:agg_n] if agg_n else items_newest_first)
+    if not agg:
+        return "", []
+    if title_order == "rating" and ratings is not None:
+        r = list(ratings[:len(agg)])
+        ranked = [agg[k] for k in sorted(range(len(agg)), key=lambda k: -r[k])]   # stable sort
+    elif title_order in ("recent", "rating"):
+        ranked = agg
+    else:
+        raise ValueError(f"unknown title_order {title_order!r} (use 'recent' or 'rating')")
+    titles = []
+    for iid in ranked[:recent_n]:
+        m = meta.get(iid)
+        if m is not None and m.title:
+            titles.append(m.title)
+    parts = []
+    if titles:
+        parts.append(f"{recent_label}: " + "; ".join(titles))
+    if fidx is None:
+        fidx = facet_index({i: meta[i] for i in set(agg) if i in meta}, facets, ubiquitous)
+    for fc, d in zip(facets, fidx):
+        cnt = Counter()
+        for iid in agg:
+            vals = d.get(iid)
+            if vals:
+                cnt.update(vals)
         vals = [(v, c) for v, c in cnt.most_common() if c >= fc.min_count][:fc.top_n]
         if vals:
             shown = [f"{v} ({c})" if fc.show_counts else v for v, c in vals]
@@ -76,7 +105,7 @@ def structured_profile(items_newest_first, meta, facets, ubiquitous, recent_labe
     text = " | ".join(parts)
     if max_len > 0:
         text = text[:max_len]
-    return text, list(agg)
+    return text, agg
 
 
 def main():
@@ -84,8 +113,11 @@ def main():
     ap.add_argument("--split", required=True, choices=sorted(SPLITS))
     ap.add_argument("--inter", required=True, help="RecBole atomic .inter with timestamp (evaluation source of truth)")
     ap.add_argument("--config", default=None, help="config with the `dataset:` section (default: IKGR_CONFIG)")
-    ap.add_argument("--recent_n", type=int, default=10)
-    ap.add_argument("--agg_n", type=int, default=50)
+    ap.add_argument("--recent_n", type=int, default=None, help="titles shown (default: adapter.title_n)")
+    ap.add_argument("--agg_n", type=int, default=None,
+                    help="newest-N safe rows per user (default: adapter.profile_window; 0 = whole train history)")
+    ap.add_argument("--title_order", choices=["recent", "rating"], default=None,
+                    help="title order (default: adapter.title_order)")
     ap.add_argument("--max_text_len", type=int, default=2000)
     ap.add_argument("--item_max_text_len", type=int, default=2000)
     ap.add_argument("--ubiquitous_df", type=float, default=0.5,
@@ -118,19 +150,38 @@ def main():
     if ubiquitous:
         print(f"[profiles] ubiquitous facet values dropped from user profiles: {sorted(ubiquitous)}", flush=True)
 
+    title_n = args.recent_n if args.recent_n is not None else int(getattr(adapter, "title_n", 10))
+    window = args.agg_n if args.agg_n is not None else getattr(adapter, "profile_window", 50)
+    window = int(window) if window and int(window) > 0 else None
+    title_order = args.title_order or getattr(adapter, "title_order", "recent")
+    if title_order == "rating" and "rating" not in df.columns:
+        print("[profiles] WARNING: no rating column in the .inter -> titles ordered newest first", flush=True)
+        title_order = "recent"
+    print(f"[profiles] format: '{adapter.recent_label}' = {title_n} titles ({title_order}) | window = "
+          f"{'whole train history' if window is None else f'newest {window}'} | facets = "
+          f"{[fc.label for fc in facets]}", flush=True)
+
     tr = df[df["safe"]].copy()
     tr["_row"] = np.arange(len(tr))
     tr = tr.sort_values(["user_id", "timestamp", "_row"], ascending=[True, False, False], kind="mergesort")
-    user_profile, prov_rows, n_items_used = {}, [], []
+    if window is not None:
+        tr = tr.groupby("user_id", sort=False, observed=True).head(window)   # keeps the newest-first order
+    fidx = facet_index(meta, facets, ubiquitous)
+    has_rating = "rating" in tr.columns
+    user_profile, empty_users, n_items_used = {}, [], []
     for uid, g in tr.groupby("user_id", sort=False, observed=True):
-        uid = str(uid)
         seq = [str(x) for x in g["item_id"].tolist()]
-        text, used = structured_profile(seq, meta, facets, ubiquitous, adapter.recent_label,
-                                        args.recent_n, args.agg_n, args.max_text_len)
+        rat = g["rating"].tolist() if has_rating else None
+        text, used = structured_profile(seq, meta, facets, ubiquitous, adapter.recent_label, title_n, None,
+                                        args.max_text_len, ratings=rat, title_order=title_order, fidx=fidx)
         if text:
-            user_profile[uid] = text
-            prov_rows.extend((uid, i) for i in used)
+            user_profile[str(uid)] = text
             n_items_used.append(len(used))
+        else:
+            empty_users.append(uid)
+    # provenance = every window row of a user who got a profile (built vectorised: up to ~20M rows)
+    keep = ~tr["user_id"].isin(empty_users) if empty_users else np.ones(len(tr), dtype=bool)
+    prov = tr.loc[keep, ["user_id", "item_id"]]
 
     n_empty = len(users) - len(user_profile)
     print(f"[profiles] users with profile={len(user_profile)} empty={n_empty} "
@@ -152,12 +203,12 @@ def main():
     pd.DataFrame(rows, columns=["user_id", "user_profile", "item_id", "item_profile"]).to_csv(
         args.out_profiles, index=False)
 
-    prov = pd.DataFrame(prov_rows, columns=["user_id", "item_id"])
-    prov.to_csv(args.out_provenance, index=False, compression="gzip")
+    prov.to_csv(args.out_provenance, index=False, compression={"method": "gzip", "compresslevel": 1})
     meta_out = {
         "split": args.split, "ratios": SPLITS[args.split][0], "group_by_user": SPLITS[args.split][1],
         "inter": os.path.abspath(args.inter), "dataset": adapter.name, "style": "structured",
-        "recent_n": args.recent_n, "agg_n": args.agg_n,
+        "recent_label": adapter.recent_label, "title_order": title_order, "title_n": title_n,
+        "profile_window": window, "recent_n": title_n, "agg_n": window,
         "max_text_len": args.max_text_len, "n_users": len(users), "n_items": len(items),
         "n_users_with_profile": len(user_profile), "n_users_empty_profile": n_empty,
         "n_provenance_pairs": len(prov),

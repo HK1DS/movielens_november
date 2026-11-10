@@ -30,3 +30,8 @@
   시작은 무제한, 첫 429에 1초 간격), 캐시 저장 500회 간격, `pilot_llm.py` + `scripts\intent_pilot.bat` / `intent_full.bat`.
 - 2026-11-10: 데이터 규모를 이전 MovieLens 레포 최종 패키지와 동일하게 고정(ml-25m, k=30: 133,684 / 15,785 / 24,046,865).
   단계 0·A 크기를 어댑터 `REFERENCE`와 대조(`scale_check.json`), 불일치 시 B/C 차단. `scripts\intent_prep.bat` = 무료 준비만(TO+TO_GLOBAL).
+- 2026-11-10: `--max_hours` 시간 제한(exit 5 일시정지/재개), 분 단위 추세 로그 `llm_progress_step{1,2}.csv`, 페이싱 완화(AIMD),
+  아이템 우선 처리, Windows 절전 방지. `scripts\intent_run_7h.bat`로 TO step1 7시간 실행 시작(추세 보고 전체 소요시간 판단).
+- 2026-11-10: MovieLens 유저 프로필 형식 변경 — "최근 10편 + 최근 50편 장르" → **train 이력 전체에서 평점 상위 15편(동점 최신순) +
+  이력 전체 장르 분포** (bulk-rating 때문에 최근 목록이 무의미). 어댑터 계약에 `title_order`/`title_n`/`profile_window` 추가
+  (기본값은 이전 동작 그대로). 아이템 호출이 끝나기 전에 바꿔 버려진 유저 호출 없음. 외부 일시정지용 STOP 파일(`scripts\intent_stop.bat`).

@@ -91,7 +91,7 @@ scripts/setup_venv.ps1         Windows GPU venv (기존 goodreads-ikgr venv 재�
 |---|---|---|
 | `iter_interactions()` | 0 | `(user_id, item_id, rating, timestamp_epoch)` 스트림. timestamp 없으면 0.0 |
 | `load_items(ids)` → `ItemMeta` | P, D | `title`(유저 프로필의 최근 목록에 들어갈 표시명), `profile`(아이템 intent용 정적 텍스트), `relations`(relation → 노드 목록) |
-| `recent_label`, `profile_facets` | P | 유저 프로필 형식: `"<recent_label>: t1; t2 … | <facet.label>: v1, v2 …"` |
+| `recent_label`, `title_order`, `title_n`, `profile_window`, `profile_facets` | P | 유저 프로필 형식: `"<recent_label>: t1; t2 … | <facet.label>: v1, v2 …"`. 윈도 = 최신 `profile_window`개 safe-train 행(None = train 이력 전체), 제목 = 윈도에서 `title_order`(`recent` 최신순 / `rating` 평점 높은 순, 동점은 최신순) 앞 `title_n`개, facet = 윈도 전체 집계. provenance = 윈도 전체 |
 | `meta_relations` | D, E | 메타 KG 노드 타입 (relation별 `max_per_item`, `min_df`) |
 | `ts_clip` | T | timestamp clamp 창 (`dataset.ts_clip`으로 덮어쓰기 가능) |
 | `source_files()` | D | 내용이 바뀌면 KG pack을 다시 만들 원본 파일 목록 |
@@ -110,11 +110,15 @@ scripts/setup_venv.ps1         Windows GPU venv (기존 goodreads-ikgr venv 재�
 | positive | 모든 평점을 implicit interaction으로 유지 | `dataset.min_rating` |
 | `(no genres listed)` 영화 | 평점째 제외 → 평점 24,973,468 · 유저 162,541 · 영화 54,479 | `options.drop_no_genres: false` |
 | 아이템 텍스트 | `"title \| genres"` (예: `Toy Story (1995) \| Adventure\|Animation\|…`) | 어댑터 `load_items` |
-| 메타 KG / 유저 프로필 facet | `genre` 하나 / `Frequent genres: Drama (12), …` | 어댑터 클래스 속성 |
+| 메타 KG / 유저 프로필 facet | `genre` 하나 / `Frequent genres: Drama (412), …` | 어댑터 클래스 속성 |
+| 유저 프로필 제목 목록 | **train 이력 전체에서 평점 높은 15편**(동점은 최신순), 장르 분포도 이력 전체 집계 → `Favorite movies (highest rated first): …` | 어댑터 `title_order` / `title_n` / `profile_window` |
 | 태그 (`tags.csv`, genome) | **사용 안 함** (전 기간 집계 → 누수) | — |
 | 참고: 이전 레포 k=30 core | 유저 133,684 · 아이템 15,785 · 상호작용 24,046,865 | — |
 
 유저 프로필은 이 레포의 정확한 train-only 프로필이라 이전 레포("이력 앞 80%")와 텍스트·intent가 다르다.
+제목 목록을 "최근 시청"이 아니라 "평점 상위"로 고른 이유(2026-11-10): MovieLens timestamp는 평점 **입력** 시각이라
+가입 때 수백 편을 한꺼번에 매긴 유저의 "최근 50편"은 의미 없는(대개 제목 알파벳순) 덩어리다. 명시적 평점이 취향 신호로 더 강하고,
+최근성은 모델의 recency 채널이 timestamp로 따로 다룬다. 제목만 보여주고 평점 숫자는 넣지 않는다.
 
 남은 우려(조용히 바꾸지 말 것):
 - 아이템 텍스트가 제목+장르뿐이라 LLM 아이템 intent가 장르를 되풀이할 가능성이 크다(= genre 메타 채널과 중복).
@@ -134,6 +138,7 @@ scripts/setup_venv.ps1         Windows GPU venv (기존 goodreads-ikgr venv 재�
 | `scripts\intent_prep.bat` | **무료 준비만** (LLM 호출 없음): ml-25m 다운로드 → k=30 core → TO·TO_GLOBAL 두 split의 train-only 프로필 → 이전 레포 규모와 대조 → 두 split의 LLM 비용 추정 |
 | `scripts\intent_pilot.bat` | ml-25m 다운로드·압축해제(없으면) → 무료 준비 `0ATPS` → **파일럿**: 실제 프로필 300명+아이템 100개(~800회 호출)로 Luxia 처리속도를 재서 전체 소요시간을 외삽하고, intent 샘플을 `run_k30_TO_pilot\pilot_report.md`에 남김 |
 | `scripts\intent_full.bat` | (준비가 끝났으면 건너뜀) → 전체 step1·step2 + KG pack(D). 첫 유료 호출 전에 비용 추정과 y/N 확인 |
+| `scripts\intent_run_7h.bat` | 전체 step1·step2를 **최대 7시간만**(확인 없이) 돌리고 캐시 저장 후 일시정지. 같은 파일을 다시 실행하면 이어서 |
 
 모두 Ctrl+C로 멈추고 같은 파일을 다시 실행하면 이어서 한다. 파일럿의 step1 결과는 본 실행이 재사용한다.
 
@@ -149,6 +154,7 @@ scripts/setup_venv.ps1         Windows GPU venv (기존 goodreads-ikgr venv 재�
 |---|---|---|
 | ~4.8 회/초 (동시 8, 제한 없음) | 2026-11 Goodreads step2 실측(15,198회/53분) | **약 17시간** |
 | ~1 회/초 (429 후 1초 간격) | 2026-07 이전 MovieLens 레포에서 Luxia가 동시 8에 429 → 1초 페이싱 | **약 3.5일** |
+| **~1.1 회/초 (≈4,000회/시간)** | **2026-11-10 이 레포 실측** (TO step1: 아이템 15,784 + 유저 13,062회, `run_k30_TO/llm_progress_step1.csv`). 429가 계속 나서 간격이 0.5–1초에 머묾. 유저 프롬프트가 아이템보다 10배 길어도 속도가 같음 → 토큰이 아니라 **요청 수 제한** | 남은 TO+TO_GLOBAL B/C 약 48만 회 → **약 5일** |
 
 어느 쪽인지는 계정 한도에 달려 있어서 파일럿 리포트의 `projected`가 실제 값이다. 무료 준비(0ATPS)는 25M 행 처리로 약 15–30분,
 step2 첫 실행은 mpnet 인코더(~420MB) 다운로드가 붙는다. 비용은 `S` 단계가 계산한다(Goodreads 관측 단가 기준 $0.50–0.61/1천 회 → 30만 회면 약 $150–180, 정가 기준은 그보다 낮음).
@@ -163,8 +169,17 @@ python run_pipeline.py --k 30 --split TO --steps ER --seeds 2020 --specs IKGR_lg
 python paired_compare.py --run_dir run_k30_TO --split TO --a IKGR_lgcn_dyn --b LightGCN IKGR_lgcn_dyn_nointent --by_activity
 ```
 
+**시간 제한·추세:** `run_pipeline.py --max_hours H`면 H시간 뒤 새 호출을 시작하지 않고 캐시를 저장한 뒤 exit 5로 멈춘다(같은 명령으로 재개).
+실행 중 `run_k30_<SPLIT>\STOP` 파일을 만들면(`scripts\intent_stop.bat`) 같은 방식으로 바로 일시정지한다(Ctrl+C 없이, 다음 실행 시작 때 자동 삭제).
+ps1의 `-Until HH:mm`은 오늘 그 시각까지로 시간 제한을 건다. `-RebuildProfiles`는 프로필 형식을 바꾼 뒤 두 split의 프로필을 다시 만든다
+(아이템 intent 캐시는 그대로 재사용; `scripts\intent_reprofile_run.bat` = 재생성 후 오늘 19:32까지 이어서 실행).
+step1/step2는 1분마다 `run_k30_<SPLIT>\llm_progress_step{1,2}.csv`에 누적 호출 수(아이템/유저), 구간·평균 처리속도,
+429·HTTP·기타 오류 수, 현재 요청 간격, 키 상태를 남긴다(재개한 실행은 같은 파일에 이어 붙음 → 그대로 추세 그래프).
+아이템을 먼저 처리한다(카탈로그 텍스트만 쓰므로 split·유저 프로필 형식과 무관하게 재사용됨). Windows에서는 실행 중 절전을 막는다.
+
 LLM 속도 관련 환경변수: `IKGR_STEP1_WORKERS` / `IKGR_STEP2_WORKERS`(기본 8), `IKGR_LLM_MIN_INTERVAL_SECONDS`(처음부터 요청 간격, 기본 0),
-`IKGR_LLM_429_MIN_INTERVAL_SECONDS`(첫 429 이후 전 워커 공통 간격, 기본 1.0), `IKGR_CACHE_SAVE_EVERY`(캐시 저장 간격, 기본 500회).
+`IKGR_LLM_429_MIN_INTERVAL_SECONDS`(첫 429 이후 전 워커 공통 간격, 기본 1.0), `IKGR_LLM_PACE_RECOVER_EVERY`(429 없이 이만큼 성공하면
+간격을 `IKGR_LLM_PACE_RECOVER_FACTOR`=0.75배로 완화, 기본 200; 0이면 이전 레포처럼 끝까지 유지), `IKGR_CACHE_SAVE_EVERY`(캐시 저장 간격, 기본 500회).
 
 중단/재개는 Goodreads 레포와 같다: Ctrl+C 후 같은 명령을 다시 실행하면 0/A/T/P는 산출물이 있으면 건너뛰고,
 B/C는 LLM 캐시에 없는 프로필만 호출하고, B/C/D는 입력 해시가 같으면 통째로 건너뛰고(`--redo D` 등으로 강제),

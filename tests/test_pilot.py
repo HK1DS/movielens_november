@@ -10,6 +10,7 @@ Run:  python -m pytest -q tests/test_pilot.py
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -64,12 +65,12 @@ def test_pilot_projects_time_and_full_run_reuses_it(tmp_path):
         finally:
             os.environ.pop("FAKE_LLM_429_FIRST"); os.environ.pop("FAKE_LLM_RETRY_AFTER")
         assert "[Rate Limit 429] shared cooldown" in out
-        assert "all workers now paced at one request start per 0.02s" in out
+        assert re.search(r"all workers now paced at one request start per 0\.0\d+s", out)  # 0.02, or x1.5 if 429s race
         assert "[llm-keys]" not in out and "0 exhausted" in out           # plain 429 never rotates keys
         pdir = wd / "run_k5_TO_pilot"
         res = json.load(open(pdir / "pilot_result.json", encoding="utf-8"))
         assert res["step1"]["calls"] == 30 and res["step2"]["calls"] == 30
-        assert res["step1"]["paced_interval_s"] == 0.02
+        assert res["step1"]["paced_interval_s"] >= 0.02                 # paced (x1.5 per repeat 429)
         report = open(pdir / "pilot_report.md", encoding="utf-8").read()
         assert "| **total** |" in report and "calls/s" in report
         assert "## Sample users" in report and "exact:" in report and "related:" in report

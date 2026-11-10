@@ -3,11 +3,13 @@ Extract exact intents
 '''
 
 import yaml, os
-import re, ast, json
+import re, ast, json, time
+import requests
 import pandas as pd
 from tqdm import tqdm
 from ikgr_core.llm_client import AllKeysExhausted, LocalLLM
 from ikgr_core.rate_limit import SharedRateLimiter, backoff_with_jitter, retry_after_seconds
+from ikgr_core.llm_run import EXIT_PAUSED, Progress, deadline, keep_awake, time_up
 from ikgr_core.utils import read_csv, write_csv, ensure_dir
 
 # Number of concurrent LLM requests for intent extraction.
@@ -62,6 +64,11 @@ def main():
     llm_cfg = cfg["llm"]
     llm = LocalLLM(**llm_cfg)
     print(f"[step1] LLM keys: {llm.keys.status()}", flush=True)
+    if keep_awake():
+        print("[step1] Windows sleep blocked while this step runs", flush=True)
+    if deadline():
+        print(f"[step1] time budget: stops starting new calls at {time.strftime('%Y-%m-%d %H:%M', time.localtime(deadline()))}",
+              flush=True)
 
     df = read_csv(in_csv).fillna("")
     # expected columns: user_id,user_profile,item_id,item_profile
@@ -70,7 +77,6 @@ def main():
     p_user = load_prompt("prompts/step1_intents.txt")
     p_item = p_user  # same template
 
-    import json, time, requests
     cache_path = os.path.join(work, "step1_cache.json")
     if os.path.exists(cache_path):
         with open(cache_path, "r", encoding="utf-8") as f:
@@ -88,6 +94,7 @@ def main():
         os.replace(tmp, cache_path)
 
     rate_limiter = SharedRateLimiter()
+    progress = Progress()
 
     def chat_with_retry(sys_prompt, prompt, max_retries=LLM_MAX_RETRIES, initial_delay=LLM_RETRY_DELAY):
         # Shared pacing across workers (ikgr_core/rate_limit.py): honours Retry-After, adds jitter,
@@ -96,11 +103,14 @@ def main():
         for attempt in range(max_retries):
             try:
                 rate_limiter.acquire()
-                return llm.chat(sys_prompt, prompt).strip()
+                out = llm.chat(sys_prompt, prompt).strip()
+                rate_limiter.note_success()        # lets the pacing relax again after a 429-free streak
+                return out
             except AllKeysExhausted:
                 raise                      # no point retrying: every API key is out of credit
             except requests.exceptions.HTTPError as e:
                 status = e.response.status_code if e.response is not None else "unknown"
+                progress.error("429" if status == 429 else "http")
                 if status == 429:
                     wait = max(delay, retry_after_seconds(e.response) or 0.0)
                     switched = rate_limiter.defer_all(wait)
@@ -117,6 +127,7 @@ def main():
                     time.sleep(sleep_for)
                 delay = min(delay * 2, 60)
             except Exception as e:
+                progress.error("other")
                 sleep_for = backoff_with_jitter(delay)
                 print(f"\n[Error] {e}. Retrying in {sleep_for:.1f} seconds...")
                 time.sleep(sleep_for)
@@ -138,6 +149,7 @@ def main():
     failed = {"user": 0, "item": 0}
     save_state = {"since_save": 0, "done": 0}
     keys_exhausted = threading.Event()
+    deferred = {"user": 0, "item": 0}           # not started because the time budget ran out
 
     def process(kind, prof, template):
         key = str(prof).strip()
@@ -150,6 +162,10 @@ def main():
         if keys_exhausted.is_set():            # all API keys gone: skip, re-run resumes these
             with cache_lock:
                 failed[kind] += 1
+            return
+        if time_up():                          # time budget over: leave it for the next run
+            with cache_lock:
+                deferred[kind] += 1
             return
         try:
             ans = chat_with_retry(sys_prompt, template.replace("{PROFILE}", key))
@@ -171,13 +187,16 @@ def main():
             cache[kind][key] = parsed
             save_state["since_save"] += 1
             save_state["done"] += 1
+            progress.success(kind)
             if save_state["since_save"] >= CACHE_SAVE_EVERY:
                 save_cache()
                 save_state["since_save"] = 0
 
-    # Build the pending job list (dedup within a kind + skip already-cached).
+    # Build the pending job list (dedup within a kind + skip already-cached). Items first: their
+    # intents depend only on the static catalog text, so they stay valid across splits and
+    # user-profile formats even if a run is paused part-way.
     jobs, seen = [], {"user": set(), "item": set()}
-    for kind, profiles, template in (("user", unique_users, p_user), ("item", unique_items, p_item)):
+    for kind, profiles, template in (("item", unique_items, p_item), ("user", unique_users, p_user)):
         for prof in profiles:
             key = str(prof).strip()
             if key and key not in cache[kind] and key not in seen[kind]:
@@ -190,7 +209,11 @@ def main():
     if jobs:
         from ikgr_core.jobs import run_interruptible
         _t0 = time.time()
-        run_interruptible(process, jobs, MAX_WORKERS, "Extracting Intents", save_cache)
+        progress.start(os.path.join(work, "llm_progress_step1.csv"), len(jobs), rate_limiter, llm.keys)
+        try:
+            run_interruptible(process, jobs, MAX_WORKERS, "Extracting Intents", save_cache)
+        finally:
+            progress.stop()
         _dt = time.time() - _t0
         print(f"[step1] throughput: calls={save_state['done']} seconds={_dt:.1f} "
               f"rate={save_state['done'] / max(_dt, 1e-9):.2f}/s | keys: {llm.keys.status()}", flush=True)
@@ -211,6 +234,10 @@ def main():
         print(f"[step1] STOPPED: all LLM API keys exhausted; {failed['user']} user / {failed['item']} item "
               f"profiles not done. Add/recharge keys in .env and re-run the same command.", flush=True)
         raise SystemExit(4)
+    if deferred["user"] or deferred["item"]:
+        print(f"[step1] PAUSED: time budget reached or STOP file found; {deferred['item']} item / {deferred['user']} user profiles "
+              f"left. Re-run the same command to continue (finished calls are cached).", flush=True)
+        raise SystemExit(EXIT_PAUSED)
     if failed["user"] or failed["item"]:
         # Do NOT let the pipeline mark this stage complete: failed profiles are not
         # cached, so re-running the same command calls only those.

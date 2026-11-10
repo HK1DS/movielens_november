@@ -4,6 +4,12 @@
 #                                                       same scale as HK1DS/hk1ds_jwkim_movielens (k=30)
 #   scripts\intent_pilot.bat   (= this script)            data prep + small LLM pilot (time/cost projection)
 #   scripts\intent_full.bat    (= this script -Full)      data prep (skipped if done) + full B/C + KG packs (D)
+#   scripts\intent_run_7h.bat  (= -Full -Hours 7 -Yes)    full B/C for at most 7 hours, no prompt; pauses with the
+#                                                       cache saved (re-run to continue); trend in llm_progress_*.csv
+#   scripts\intent_stop.bat                               graceful pause of a running B/C (creates run_k*_*\STOP)
+#   -RebuildProfiles   rebuild the train-only user profiles of TO and TO_GLOBAL first (after a profile-format
+#                      change; item intents already in the LLM cache stay valid)
+#   -Until HH:mm       time budget up to a clock time today (instead of -Hours)
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\run_intent_augmentation.ps1 [-Full] [-K 30] [-Split TO]
 #
@@ -19,7 +25,11 @@ param(
     [switch]$PrepOnly,
     [string]$Python = "",
     [int]$PilotUsers = 300,
-    [int]$PilotItems = 100
+    [double]$Hours = 0,
+    [switch]$Yes,
+    [int]$PilotItems = 100,
+    [switch]$RebuildProfiles,
+    [string]$Until = ""
 )
 
 $ErrorActionPreference = "Continue"
@@ -66,6 +76,14 @@ if (-not ((Test-Path "$raw\ratings.csv") -and (Test-Path "$raw\movies.csv"))) {
 }
 Write-Host "[data] $raw ready"
 
+# 3b) profile format changed -> rebuild both splits' train-only profiles (free, a few minutes)
+if ($RebuildProfiles) {
+    foreach ($s in @("TO", "TO_GLOBAL")) {
+        & $Python -u run_pipeline.py --k $K --split $s --steps P --force_prep
+        if ($LASTEXITCODE -ne 0) { Fail "profile rebuild for $s failed (see above)" }
+    }
+}
+
 # 4) free stages: interactions -> k-core -> RecBole .inter -> train-only profiles -> cost estimate
 & $Python -u run_pipeline.py --k $K --split $Split --steps 0ATPS
 if ($LASTEXITCODE -ne 0) { Fail "data preparation failed (see above)" }
@@ -93,8 +111,24 @@ if (-not $Full) {
     exit 0
 }
 
-# 5b) full LLM stages (run_pipeline asks y/N with the cost estimate before the first paid call)
-& $Python -u run_pipeline.py --k $K --split $Split --steps BCD
+# 5b) full LLM stages (run_pipeline asks y/N with the cost estimate before the first paid call, unless -Yes)
+if ($Until) {
+    $target = [datetime]::ParseExact($Until, "HH:mm", [Globalization.CultureInfo]::InvariantCulture)
+    $left = ($target - (Get-Date)).TotalHours
+    if ($left -le 0.05) { Fail "-Until $Until is already past (or under 3 minutes away) today" }
+    $Hours = [math]::Round($left, 3)
+    Write-Host "[budget] -Until $Until -> $Hours h"
+}
+$extra = @()
+if ($Hours -gt 0) { $extra += @("--max_hours", "$Hours") }
+if ($Yes) { $extra += "--yes" }
+& $Python -u run_pipeline.py --k $K --split $Split --steps BCD @extra
 $rc = $LASTEXITCODE
+if ($rc -eq 5) {
+    Write-Host ""
+    Write-Host "[paused] time budget reached; LLM cache saved. Trend: run_k$($K)_$($Split)\llm_progress_step1.csv"
+    Write-Host "         run the same .bat again to continue."
+    exit 0
+}
 if ($rc -ne 0) { Fail "LLM stage stopped (exit $rc). Fix the cause above and run the same .bat again to resume." }
 Write-Host "[done] intents + KG packs in run_k$($K)_$($Split)\  -> next: training/evaluation (--steps ER)"
