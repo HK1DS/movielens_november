@@ -41,3 +41,6 @@
   3배가 아니라 제한이 순수 키 단위는 아님 → 기본값은 parallel 유지, 남은 B/C 예상 약 3.7일.
 - 2026-11-11: 장시간 실측(6h 26,047회, 5h 22,482회)은 시간당 약 4,400회로 키 1개와 거의 같음 → 제한은 계정·서비스 공용.
   parallel은 손해가 없어 그대로 둠. 실행 스크립트 `scripts\intent_run_{1,5,6,7,9}h.bat`(9h는 GPU를 숨기고 API만).
+- 2026-11-12: TO step1 완료(유저 133,200 + 아이템 15,784). step2 재작성 — RAG 입력(어휘·임베딩·프로필별 top-k 후보)을
+  split마다 한 번 만들어 `rag_manifest.json`과 함께 고정, 재개 시 재인코딩 없음. 근사 인덱스(Annoy/sklearn) 대신 정확한 코사인 top-k,
+  인코더는 GPU(`IKGR_ENCODER_DEVICE`). step1 결과가 바뀌면 exit 2(어휘 혼합 방지). launcher에 `-PaidSteps`(예: B만).

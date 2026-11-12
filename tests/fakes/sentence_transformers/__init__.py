@@ -19,7 +19,11 @@ def _vec(text):
 
 class SentenceTransformer:
     def __init__(self, name, *a, **kw):
+        import os
+        if os.environ.get("FAKE_ST_FORBID") == "1":          # tests: a resumed step2 must not re-encode
+            raise RuntimeError("fake SentenceTransformer constructed although FAKE_ST_FORBID=1")
         self.name = name
+        self.device = kw.get("device")
 
     def encode(self, texts, convert_to_numpy=True, convert_to_tensor=False, **kw):
         single = isinstance(texts, str)

@@ -65,7 +65,7 @@ apply_k_core.py                A  (k,k)-core
 make_temporal_inter.py         T  RecBole .inter (+ 선택적 timestamp clip 창)
 build_trainonly_profiles.py    P  train-only 유저 프로필 + provenance (형식은 어댑터 facet이 결정)
 estimate_llm_cost.py           S  LLM 호출/비용 추정 (캐시 반영)
-step1.py, step2.py             B, C  LLM intent 추출 / RAG 확장 (캐시·재개·Ctrl+C 안전)
+step1.py, step2.py             B, C  LLM intent 추출 / RAG 확장 (캐시·재개·Ctrl+C 안전; step2 RAG 입력은 한 번만 생성)
 build_kg.py, build_meta_kg.py  D  intent KG pack / 메타데이터 KG pack(format 2)
 eval_slices.py                 E  학습·평가·누수 가드·per-user 덤프·재랭킹 대조군
 paired_compare.py              R  paired CI + Pareto 리포트
@@ -139,7 +139,8 @@ scripts/setup_venv.ps1         Windows GPU venv (기존 goodreads-ikgr venv 재�
 | `scripts\intent_pilot.bat` | ml-25m 다운로드·압축해제(없으면) → 무료 준비 `0ATPS` → **파일럿**: 실제 프로필 300명+아이템 100개(~800회 호출)로 Luxia 처리속도를 재서 전체 소요시간을 외삽하고, intent 샘플을 `run_k30_TO_pilot\pilot_report.md`에 남김 |
 | `scripts\intent_full.bat` | (준비가 끝났으면 건너뜀) → 전체 step1·step2 + KG pack(D). 첫 유료 호출 전에 비용 추정과 y/N 확인 |
 | `scripts\intent_run_7h.bat` | 전체 step1·step2를 **최대 7시간만**(확인 없이) 돌리고 캐시 저장 후 일시정지. 같은 파일을 다시 실행하면 이어서 |
-| `scripts\intent_run_1h.bat` / `_5h` / `_6h` / `_9h` | 같은 동작, 최대 1·5·6·9시간. `_9h`는 GPU를 숨기고(`CUDA_VISIBLE_DEVICES=-1`) API 호출만 |
+| `scripts\intent_run_1h.bat` / `_2h` / `_5h` / `_6h` / `_9h` | 같은 동작, 최대 1·2·5·6·9시간. GPU는 step2가 RAG 입력을 처음 만들 때만 잠깐 씀 |
+| `scripts\intent_finish_step1_5h.bat` | step1(B)만 최대 5시간(`-PaidSteps B`), step2는 시작하지 않음. GPU 숨김 |
 | `scripts\intent_stop.bat` | 실행 중인 step1·step2를 바로 일시정지(캐시 저장). 아무 `intent_run_*`로 이어서 |
 
 모두 Ctrl+C로 멈추고 같은 파일을 다시 실행하면 이어서 한다. 파일럿의 step1 결과는 본 실행이 재사용한다.
@@ -162,6 +163,16 @@ scripts/setup_venv.ps1         Windows GPU venv (기존 goodreads-ikgr venv 재�
 
 어느 쪽인지는 계정 한도에 달려 있어서 파일럿 리포트의 `projected`가 실제 값이다. 무료 준비(0ATPS)는 25M 행 처리로 약 15–30분,
 step2 첫 실행은 mpnet 인코더(~420MB) 다운로드가 붙는다. 비용은 `S` 단계가 계산한다(Goodreads 관측 단가 기준 $0.50–0.61/1천 회 → 30만 회면 약 $150–180, 정가 기준은 그보다 낮음).
+
+**step2의 RAG 입력은 split마다 한 번만 만든다**(`ikgr_core/rag.py`, 2026-11-12). 첫 step2 실행이 step1 결과에서
+① intent 어휘(정렬된 고유 exact intent, `intent_vocab.json`), ② 그 임베딩(`intents_emb.npy`, D단계 `build_kg.py`가 사용),
+③ 유저·아이템 프로필마다 가장 비슷한 `knn_k`(100)개 후보 intent(`rag_candidates.npz`, **정확한 코사인 top-k**)를 만들고
+`rag_manifest.json`(인코더·k·어휘/프로필 해시)을 마지막에 쓴다. 이어서 실행할 때는 이 파일을 그대로 읽고 **다시 인코딩하지 않는다**.
+인코더는 GPU가 보이면 GPU에서 돈다(`IKGR_ENCODER_DEVICE=auto|cuda|cpu`, 배치 `IKGR_ENCODER_BATCH`; TO 기준 GPU로 수 분, CPU로 1–2시간).
+예전 Annoy/sklearn 근사 인덱스는 없앴다(매 실행 재구축·Annoy의 비결정성 때문에 일시정지 전후 후보가 달라질 수 있었음).
+API 호출 없이 이 파일만 만들려면 `python step2.py --prepare_only` (`IKGR_CONFIG=run_k30_TO/config.yaml`).
+step2 결과가 쌓인 뒤 step1 결과가 바뀌면 두 어휘가 섞이지 않게 **exit 2로 멈춘다**(`step2_cache.json`을 지우고 다시 시작하거나,
+`IKGR_STEP2_REBUILD=1`로 재구축하고 기존 결과 유지). 이 RAG 파일 3개 + `rag_manifest.json`은 팀원과 결과를 공유할 때 같이 넘긴다.
 
 직접 실행할 때:
 

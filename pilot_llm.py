@@ -76,7 +76,6 @@ def main():
                           "step1_output": os.path.join(pdir, "step1_intents.csv"),
                           "step2_output": os.path.join(pdir, "step2_related_intents.csv")})
     pcfg["rag"].update({"encoding_npy": os.path.join(pdir, "intents_emb.npy"),
-                        "annoy_index": os.path.join(pdir, "intents.ann"),
                         "vocab_json": os.path.join(pdir, "intent_vocab.json")})
     pcfg_path = os.path.join(pdir, "config.yaml")
     yaml.safe_dump(pcfg, open(pcfg_path, "w", encoding="utf-8"), allow_unicode=True, sort_keys=False)

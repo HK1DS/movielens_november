@@ -41,10 +41,8 @@ llm:
 
 rag:
   encoder: "sentence-transformers/all-mpnet-base-v2"
-  annoy_trees: 50
-  knn_k: 100
+  knn_k: 100                        # candidate intents per profile (exact cosine top-k, ikgr_core/rag.py)
   encoding_npy: run/intents_emb.npy
-  annoy_index: run/intents.ann
   vocab_json: run/intent_vocab.json
 
 recbole:

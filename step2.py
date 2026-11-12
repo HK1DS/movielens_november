@@ -1,16 +1,26 @@
-'''
-RAG expand related intents (from fixed intent vocab)
-'''
+"""
+step2 (stage C): expand each profile's exact intents with related intents from the frozen vocabulary.
+
+1. RAG inputs, built ONCE per run directory and reused on every resume (ikgr_core/rag.py):
+   vocabulary = sorted unique step1 exact intents, their encoder embeddings, and for every user / item
+   profile its knn_k most similar intents (exact cosine). The encoder runs on the GPU when available
+   (IKGR_ENCODER_DEVICE). A resumed run loads these files and never re-encodes.
+2. One LLM call per profile: pick the related intents among its candidates (minus its exact intents).
+   Calls are cached per profile text, resumable, and paced per API key like step1.
+
+  python step2.py                 # build/reuse RAG inputs, then the LLM calls
+  python step2.py --prepare_only  # only build/check the RAG inputs (no API call)
+If step1's output changes after step2 has cached results, step2 stops (exit 2) instead of mixing
+candidates from two vocabularies; IKGR_STEP2_REBUILD=1 rebuilds the RAG inputs anyway.
+"""
 
 import os
-import yaml, numpy as np
-import pandas as pd
-from tqdm import tqdm
-from ikgr_core.utils import load_json, save_json, read_csv, write_csv, ensure_dir
-from ikgr_core.rag import IntentEncoderIndex, knn_strings
+import yaml
+from ikgr_core.utils import read_csv, write_csv, ensure_dir
+from ikgr_core.rag import NOT_BUILT, build_frozen, device_label, fingerprint, load_frozen, pick_device
 from ikgr_core.llm_client import AllKeysExhausted, LocalLLM
 from ikgr_core.key_lanes import KeyLanes, chat_with_retry as lanes_chat
-from ikgr_core.llm_run import EXIT_PAUSED, Progress, deadline, keep_awake, time_up
+from ikgr_core.llm_run import EXIT_PAUSED, Progress, keep_awake, time_up
 import re, ast, json, time
 
 # Worker threads: by default 8 per API key, all keys in parallel (ikgr_core/key_lanes.py);
@@ -72,6 +82,10 @@ def _safe_eval_list(s):
     return []
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser(description="step2: RAG related-intent expansion")
+    ap.add_argument("--prepare_only", action="store_true", help="build/check the frozen RAG inputs, no API call")
+    args = ap.parse_args()
     cfg = yaml.safe_load(open(os.environ.get("IKGR_CONFIG", "config.yaml"), encoding="utf-8"))
     paths = cfg["paths"]
     rag_cfg = cfg["rag"]
@@ -81,32 +95,22 @@ def main():
     p_rel = load_prompt("prompts/step2_related.txt")
     df = read_csv(paths["step1_output"]).fillna("")
 
-    # 1) Freeze vocabulary from step1 exact intents
     def _parse_exact_list(s):
         val = _safe_eval_list(s)
         return [str(x) for x in val if isinstance(x, str)]
 
-    vocab = set()
-    for col in ["user_intents_exact", "item_intents_exact"]:
-        for v in df[col].dropna():
-            vocab.update(_parse_exact_list(v))
-    vocab = sorted(list(vocab))
-    save_json(vocab, rag_cfg["vocab_json"])
+    # Unique profiles (first occurrence wins) with their exact intents, items before users.
+    exact_maps = {}
+    for kind in ("item", "user"):
+        sub = df[[f"{kind}_profile", f"{kind}_intents_exact"]].copy()
+        sub[f"{kind}_profile"] = sub[f"{kind}_profile"].astype(str).str.strip()
+        sub = sub[sub[f"{kind}_profile"] != ""].drop_duplicates(f"{kind}_profile")
+        exact_maps[kind] = {p: _parse_exact_list(v) for p, v in zip(sub[f"{kind}_profile"], sub[f"{kind}_intents_exact"])}
+    vocab = sorted({x for m in exact_maps.values() for lst in m.values() for x in lst})
+    profiles = {kind: sorted(m) for kind, m in exact_maps.items()}
+    print(f"[step2] profiles: {len(profiles['user']):,} users, {len(profiles['item']):,} items | "
+          f"intent vocabulary: {len(vocab):,}", flush=True)
 
-    # 2) Encode vocab + build Index
-    enc = IntentEncoderIndex(rag_cfg["encoder"])
-    emb = enc.encode(vocab)
-    np.save(rag_cfg["encoding_npy"], emb)
-    enc.build_ann(emb, emb.shape[1], rag_cfg["annoy_trees"], rag_cfg["annoy_index"])
-
-    ann = enc.load_ann(emb.shape[1], rag_cfg["annoy_index"])
-    llm = LocalLLM(**llm_cfg)
-    print(f"[step2] LLM keys: {len(llm.keys)} configured, {len(llm.keys.usable())} usable", flush=True)
-    if keep_awake():
-        print("[step2] Windows sleep blocked while this step runs", flush=True)
-    sys_prompt = "You are a helpful assistant that returns ONLY JSON lists of integers."
-
-    # 3) For each row, expand related intents for user & item via RAG + LLM selection
     cache_path = os.path.join(paths["workdir"], "step2_cache.json")
     if os.path.exists(cache_path):
         with open(cache_path, "r", encoding="utf-8") as f:
@@ -114,6 +118,42 @@ def main():
         print(f"Loaded cache from {cache_path} (users={len(cache.get('user', {}))}, items={len(cache.get('item', {}))})")
     else:
         cache = {"user": {}, "item": {}}
+
+    # 1) Frozen RAG inputs: reuse when they match step1's output, else build once (GPU if available)
+    rag_paths = {"vocab_json": rag_cfg["vocab_json"], "encoding_npy": rag_cfg["encoding_npy"],
+                 "candidates": os.path.join(paths["workdir"], "rag_candidates.npz"),
+                 "manifest": os.path.join(paths["workdir"], "rag_manifest.json")}
+    want = fingerprint(rag_cfg["encoder"], rag_cfg["knn_k"], vocab, profiles)
+    cands, reason = load_frozen(rag_paths, want)
+    if cands is not None:
+        print(f"[step2] reusing frozen RAG inputs ({rag_paths['manifest']}): no re-encoding", flush=True)
+    else:
+        if reason != NOT_BUILT and (cache["user"] or cache["item"]) and os.environ.get("IKGR_STEP2_REBUILD") != "1":
+            print(f"[step2] STOP: {reason}.\n"
+                  f"  {len(cache['user']) + len(cache['item']):,} step2 results in {cache_path} were made with the old\n"
+                  f"  candidates; rebuilding would mix two vocabularies. If step1 really changed, delete step2_cache.json\n"
+                  f"  (start step2 over) or set IKGR_STEP2_REBUILD=1 to rebuild and keep the old results.", flush=True)
+            raise SystemExit(2)
+        if time_up():
+            print("[step2] PAUSED: time budget reached or STOP file found before the RAG inputs were built.", flush=True)
+            raise SystemExit(EXIT_PAUSED)
+        device = pick_device()
+        print(f"[step2] building RAG inputs ({reason}) | encoder {rag_cfg['encoder']} on {device_label(device)}",
+              flush=True)
+        if device == "cpu":
+            print("[step2] WARNING: no GPU visible -> encoding on the CPU (much slower; done once per split)", flush=True)
+        cands = build_frozen(rag_paths, want, rag_cfg["encoder"], vocab, profiles, device,
+                             log=lambda m: print(m, flush=True))
+    if args.prepare_only:
+        print("[step2] --prepare_only: RAG inputs ready, no API call made.", flush=True)
+        return
+    row_of = {kind: {p: i for i, p in enumerate(profiles[kind])} for kind in profiles}
+
+    llm = LocalLLM(**llm_cfg)
+    print(f"[step2] LLM keys: {len(llm.keys)} configured, {len(llm.keys.usable())} usable", flush=True)
+    if keep_awake():
+        print("[step2] Windows sleep blocked while this step runs", flush=True)
+    sys_prompt = "You are a helpful assistant that returns ONLY JSON lists of integers."
 
     def save_cache():
         # Atomic write to avoid corrupting the resumable cache on interrupt.
@@ -131,48 +171,12 @@ def main():
         # Per-key pacing (each key its own 429 cooldown / interval) and retries: ikgr_core/key_lanes.py
         return lanes_chat(llm, lanes, progress, sys_prompt, prompt, max_retries, initial_delay)
 
-    unique_users = df[df["user_profile"] != ""]["user_profile"].unique()
-    unique_items = df[df["item_profile"] != ""]["item_profile"].unique()
-
-    print(f"Unique Users for RAG: {len(unique_users)}, Unique Items for RAG: {len(unique_items)}")
-
-    # Create mapping table for exact intents by profile to construct options_filtered
-    user_exact_map = {}
-    item_exact_map = {}
-    for _, r in df.iterrows():
-        u_prof, i_prof = str(r.get("user_profile", "")).strip(), str(r.get("item_profile", "")).strip()
-        if u_prof and u_prof not in user_exact_map:
-            user_exact_map[u_prof] = _parse_exact_list(r.get("user_intents_exact", "[]"))
-        if i_prof and i_prof not in item_exact_map:
-            item_exact_map[i_prof] = _parse_exact_list(r.get("item_intents_exact", "[]"))
-
-    # ---- Build pending job list (skip cached + dedup within a kind) ----
-    exact_maps = {"user": user_exact_map, "item": item_exact_map}
-    jobs = []  # (kind, profile_key)
-    seen = {"user": set(), "item": set()}
-    for kind, profiles in (("item", unique_items), ("user", unique_users)):        # items first
-        for prof in profiles:
-            key = str(prof).strip()
-            if key and key not in cache[kind] and key not in seen[kind]:
-                seen[kind].add(key)
-                jobs.append((kind, key))
-
+    # ---- Pending jobs: every unique profile not cached yet, items first ----
+    jobs = [(kind, key) for kind in ("item", "user") for key in exact_maps[kind] if key not in cache[kind]]
     print(f"Pending RAG+LLM calls: {len(jobs)} | workers={MAX_WORKERS} "
           f"(cached users={len(cache['user'])}, items={len(cache['item'])})")
 
-    # ---- Pre-encode all pending profiles in ONE batch ----
-    # SentenceTransformer is NOT called concurrently (PyTorch forward is not
-    # guaranteed thread-safe); we batch-encode here, then only do ANN reads +
-    # LLM calls inside threads.
-    emb_map = {}
-    if jobs:
-        all_profs = [key for _, key in jobs]
-        prof_embs = enc.encode(all_profs)
-        for (kind, key), e in zip(jobs, prof_embs):
-            emb_map[(kind, key)] = e
-
     # ---- Concurrent expansion (thread-safe cache + periodic atomic save) ----
-    from concurrent.futures import ThreadPoolExecutor, as_completed
     import threading
 
     cache_lock = threading.Lock()
@@ -190,10 +194,13 @@ def main():
             with cache_lock:
                 deferred[kind] += 1
             return
-        exact = exact_maps[kind].get(key, [])
-        q_emb = emb_map[(kind, key)]
-        options = knn_strings(ann, q_emb, vocab, cfg["rag"]["knn_k"])  # ANN read is thread-safe
-        options_filtered = [o for o in options if o not in exact]
+        exact = set(exact_maps[kind].get(key, []))
+        options_filtered = [vocab[i] for i in cands[kind][row_of[kind][key]] if vocab[i] not in exact]
+        if not options_filtered:               # nothing left to choose from: no call needed
+            with cache_lock:
+                cache[kind][key] = []
+                progress.success(kind)
+            return
         options_text = "\n".join([f"{idx}: {opt}" for idx, opt in enumerate(options_filtered)])
         prompt = p_rel.replace("{PROFILE}", key).replace("{OPTIONS}", options_text)
         try:

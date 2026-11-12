@@ -14,7 +14,7 @@ Layout
   data/kc_k{K}/profiles_k{K}_{SPLIT}.csv      train-only user + static item profiles  stage P
   data/kc_k{K}/profile_provenance_k{K}_{SPLIT}.csv.gz (+.meta.json)                stage P
   run_k{K}_{SPLIT}/                           config, LLM caches/outputs, KG packs, results
-    config.yaml, step1_*, step2_*, intent_vocab.json, intents_emb.npy,
+    config.yaml, step1_*, step2_*, intent_vocab.json, intents_emb.npy, rag_candidates.npz,
     kg_pack.pt, meta_kg_pack.pt, slice_eval_{SPLIT}_result.json,
     per_user_{SPLIT}/*.csv.gz, report_{SPLIT}.md
 
@@ -105,7 +105,6 @@ def make_config(k, split, base="config.yaml"):
     p["meta_kg_pack"] = f"{run_dir}meta_kg_pack.pt"
     r = cfg["rag"]
     r["encoding_npy"] = f"{run_dir}intents_emb.npy"
-    r["annoy_index"] = f"{run_dir}intents.ann"
     r["vocab_json"] = f"{run_dir}intent_vocab.json"
     cfg_path = f"{run_dir}config.yaml"
     with open(cfg_path, "w", encoding="utf-8") as f:

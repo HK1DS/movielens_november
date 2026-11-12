@@ -11,6 +11,7 @@
 #   -RebuildProfiles   rebuild the train-only user profiles of TO and TO_GLOBAL first (after a profile-format
 #                      change; item intents already in the LLM cache stay valid)
 #   -Until HH:mm       time budget up to a clock time today (instead of -Hours)
+#   -PaidSteps B       run only step1 (B) and stop; C (step2) and D start on the next run with the default BCD
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\run_intent_augmentation.ps1 [-Full] [-K 30] [-Split TO]
 #
@@ -30,7 +31,8 @@ param(
     [switch]$Yes,
     [int]$PilotItems = 100,
     [switch]$RebuildProfiles,
-    [string]$Until = ""
+    [string]$Until = "",
+    [string]$PaidSteps = "BCD"
 )
 
 $ErrorActionPreference = "Continue"
@@ -123,13 +125,18 @@ if ($Until) {
 $extra = @()
 if ($Hours -gt 0) { $extra += @("--max_hours", "$Hours") }
 if ($Yes) { $extra += "--yes" }
-& $Python -u run_pipeline.py --k $K --split $Split --steps BCD @extra
+if ($PaidSteps -notmatch '^[BCD]+$') { Fail "-PaidSteps takes letters from B, C, D (got '$PaidSteps')" }
+& $Python -u run_pipeline.py --k $K --split $Split --steps $PaidSteps @extra
 $rc = $LASTEXITCODE
 if ($rc -eq 5) {
     Write-Host ""
-    Write-Host "[paused] time budget reached; LLM cache saved. Trend: run_k$($K)_$($Split)\llm_progress_step1.csv"
+    Write-Host "[paused] time budget reached; LLM cache saved. Trend: run_k$($K)_$($Split)\llm_progress_step{1,2}.csv"
     Write-Host "         run the same .bat again to continue."
     exit 0
 }
 if ($rc -ne 0) { Fail "LLM stage stopped (exit $rc). Fix the cause above and run the same .bat again to resume." }
+if ($PaidSteps -ne "BCD") {
+    Write-Host "[done] paid steps $PaidSteps finished for run_k$($K)_$($Split)\  -> next: the remaining paid steps (default BCD)"
+    exit 0
+}
 Write-Host "[done] intents + KG packs in run_k$($K)_$($Split)\  -> next: training/evaluation (--steps ER)"
