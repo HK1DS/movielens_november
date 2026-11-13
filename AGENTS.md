@@ -50,3 +50,6 @@
 - 2026-11-13: GPU 실측(RTX 3060 Ti) — LightGCN 계열은 배치마다 그래프 전체 전파라 2048·COO에서 40 epoch 76시간.
   공통 프로토콜을 **배치 8192 + CSR 인접행렬**로 변경(LightGCN 6.5시간/run, 계산 동일성 테스트). 분담 변경: 은선 = intent 없는 5개 spec
   전부(지금 시작), 진욱 = API + intent spec 2개. `scripts/benchmark_train_speed.py`(+ `benchmark_speed.bat`)로 GPU별 속도 측정.
+- 2026-11-13: 키 #1 크레딧 소진(19:20, 21,395회 성공 후). 남은 두 키가 10초 간격에 묶여 초당 0.2회로 떨어짐 — 간격 완화가 성공
+  200회 기준이라 느린 키는 몇 시간씩 못 풀렸음 → 429 없이 60초 지나도 한 단계 완화(`IKGR_LLM_PACE_RECOVER_SECONDS`), 키 2개로 초당 약 2.2회 회복.
+  **예비 키**: 동시 호출은 앞쪽 3개(`IKGR_LLM_ACTIVE_KEYS`), `LUXIA_API_KEY_4`/`_5`는 대기하다가 소진된 키 자리를 이어받음.
