@@ -34,7 +34,7 @@ IKGR_lgcn_dyn_nointent 6.9시간, BPR·IKGR_dyn_nointent 0.1~0.4시간. TO_GLOBA
 |---|---|---|
 | 데이터 준비 (ml-25m, k=30, 이전 레포와 규모 일치) | ✅ 133,684 유저 / 15,785 아이템 / 24,046,865 | ✅ |
 | step1: exact intent (API) | ✅ 11/12 | ⬜ 유저 약 99k |
-| step2: related intent (API) | 🔄 11/13 19시 기준 약 104k 남음 (11/14 완료 예상) | ⬜ 약 115k |
+| step2: related intent (API) | 🔄 11/13 19:45 기준 약 102k 남음 (키 #1 크레딧 소진 → 키 보충 후 11/14~15 완료 예상) | ⬜ 약 115k |
 | D: KG pack | ⬜ step2 직후 | ⬜ |
 | `data_bundle/` 업로드 | ⬜ 11/14~15 | ⬜ 11/16~17 (진욱 PC를 계속 돌릴 때) |
 

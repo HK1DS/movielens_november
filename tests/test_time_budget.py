@@ -167,3 +167,21 @@ def test_stop_file_pauses_gracefully(server, tmp_path):
     assert "PAUSED: time budget reached or STOP file found" in out
     cache = json.load(open(tmp_path / "run" / "step1_cache.json", encoding="utf-8"))
     assert 0 < len(cache["user"]) + len(cache["item"]) < n_users + n_items
+
+
+def test_slow_key_relaxes_by_time(monkeypatch):
+    """A key stuck at the 10 s cap gets few successes; it must still relax after 429-free time
+    (otherwise it stays throttled for hours, e.g. after another key ran out of credit)."""
+    monkeypatch.setenv("IKGR_LLM_PACE_RECOVER_EVERY", "200")
+    monkeypatch.setenv("IKGR_LLM_PACE_RECOVER_SECONDS", "0.05")
+    sys.path.insert(0, ROOT)
+    from ikgr_core.rate_limit import SharedRateLimiter
+    r = SharedRateLimiter()
+    r.min_interval_seconds = 10.0
+    r.defer_all(0)                                            # last 429 just now: no relax yet
+    assert r.note_success() is None and r.min_interval_seconds == 10.0
+    time.sleep(0.06)
+    assert r.note_success() == pytest.approx(7.5)             # 429-free for the window -> one step
+    assert r.note_success() is None                           # next step needs another window
+    time.sleep(0.06)
+    assert r.note_success() == pytest.approx(5.625)
