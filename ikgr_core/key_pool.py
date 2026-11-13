@@ -12,9 +12,10 @@ variable name, e.g. LUXIA_API_KEY:
 Order: LUXIA_API_KEY, LUXIA_API_KEY_1, _2, ..., then LUXIA_API_KEYS (duplicates
 removed). acquire() hands out the first key that is not marked exhausted (one key
 at a time). The paid stages (step1 / step2) instead go through key_lanes.KeyLanes,
-which by default calls every usable key in parallel, each with its own pacing, and
-pins a request to one key with key(idx); an exhausted key then drops out and the
-other keys carry on (KeyExhausted tells the caller to pick another key).
+which by default calls the first 3 usable keys in parallel (IKGR_LLM_ACTIVE_KEYS),
+each with its own pacing, and pins a request to one key with key(idx); an exhausted
+key then drops out and the next standby key (e.g. LUXIA_API_KEY_4) takes its place
+(KeyExhausted tells the caller to pick another key).
 
 A key is marked exhausted (for the rest of this process) when a call with it
   - returns HTTP 401 / 402 / 403 (invalid, unpaid or blocked key),

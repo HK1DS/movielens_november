@@ -192,10 +192,11 @@ step1/step2는 1분마다 `run_k30_<SPLIT>\llm_progress_step{1,2}.csv`에 누적
 429·HTTP·기타 오류 수, 현재 요청 간격, 키 상태를 남긴다(재개한 실행은 같은 파일에 이어 붙음 → 그대로 추세 그래프).
 아이템을 먼저 처리한다(카탈로그 텍스트만 쓰므로 split·유저 프로필 형식과 무관하게 재사용됨). Windows에서는 실행 중 절전을 막는다.
 
-LLM 속도 관련 환경변수(요청 간격은 **키마다 따로** 관리된다): `IKGR_LLM_KEY_MODE`(`parallel` 기본 = 모든 키 동시 호출 / `sequential` = 한 번에 키 하나),
-`IKGR_LLM_WORKERS_PER_KEY`(키당 동시 요청 수, 기본 8 → 키 3개면 워커 24), `IKGR_STEP1_WORKERS` / `IKGR_STEP2_WORKERS`(설정하면 전체 워커 수를 고정),
+LLM 속도 관련 환경변수(요청 간격은 **키마다 따로** 관리된다): `IKGR_LLM_KEY_MODE`(`parallel` 기본 = 앞쪽 키 `IKGR_LLM_ACTIVE_KEYS`개(기본 3, 0이면 전부) 동시 호출 / `sequential` = 한 번에 키 하나),
+`IKGR_LLM_WORKERS_PER_KEY`(키당 동시 요청 수, 기본 8 → 동시 호출 키 3개면 워커 24), `IKGR_STEP1_WORKERS` / `IKGR_STEP2_WORKERS`(설정하면 전체 워커 수를 고정),
 `IKGR_LLM_MIN_INTERVAL_SECONDS`(처음부터 요청 간격, 기본 0), `IKGR_LLM_429_MIN_INTERVAL_SECONDS`(그 키의 첫 429 이후 간격, 기본 1.0),
-`IKGR_LLM_PACE_RECOVER_EVERY`(그 키가 429 없이 이만큼 성공하면 간격을 `IKGR_LLM_PACE_RECOVER_FACTOR`=0.75배로 완화, 기본 200; 0이면 끝까지 유지),
+`IKGR_LLM_PACE_RECOVER_EVERY`(그 키가 429 없이 이만큼 성공하면 간격을 `IKGR_LLM_PACE_RECOVER_FACTOR`=0.75배로 완화, 기본 200),
+`IKGR_LLM_PACE_RECOVER_SECONDS`(또는 마지막 429·완화 뒤 이만큼 429가 없으면 한 단계 완화, 기본 60초 — 10초 간격에 묶인 키가 성공 횟수를 못 채워 몇 시간씩 느려지는 것 방지; 둘 다 0이면 끝까지 유지),
 `IKGR_CACHE_SAVE_EVERY`(캐시 저장 간격, 기본 500회).
 
 중단/재개는 Goodreads 레포와 같다: Ctrl+C 후 같은 명령을 다시 실행하면 0/A/T/P는 산출물이 있으면 건너뛰고,
@@ -203,9 +204,12 @@ B/C는 LLM 캐시에 없는 프로필만 호출하고, B/C/D는 입력 해시가
 E는 끝난 spec×seed를 유지한다. `eval_slices.py`·`model_ikgr.py`·`corona_retriever.py`나 설정을 바꾸면
 끝난 결과도 다시 학습한다(의도된 안전장치).
 
-### Luxia API 키 여러 개 (병렬 호출 + 소진 시 제외)
+### Luxia API 키 여러 개 (병렬 호출 + 예비 키 + 소진 시 제외)
 
-`.env`에 키를 여러 개 넣으면 step1/step2가 **모든 키를 동시에** 호출한다(`ikgr_core/key_lanes.py`, `IKGR_LLM_KEY_MODE=parallel` 기본).
+`.env`에 키를 여러 개 넣으면 step1/step2가 **앞쪽 키 3개를 동시에** 호출한다(`ikgr_core/key_lanes.py`, `IKGR_LLM_KEY_MODE=parallel` 기본,
+개수는 `IKGR_LLM_ACTIVE_KEYS`). 그 뒤의 키(`LUXIA_API_KEY_4`, `_5`, …)는 **예비 키**로 대기하다가, 쓰던 키 하나가 소진되면
+`.env` 순서대로 하나씩 그 자리를 이어받는다(로그 `[llm-keys] standby … takes over`, 진행 로그 `keys` 열 `#4 standby`).
+제한이 계정 공용이라 키를 더 동시에 써도 빨라지지 않으므로 예비 키는 크레딧만 아껴 둔다. 값이 비어 있는 줄(`LUXIA_API_KEY_4=`)은 무시된다.
 키마다 요청 간격(429 쿨다운·AIMD)과 동시 요청 상한(`IKGR_LLM_WORKERS_PER_KEY`, 기본 8)이 따로 있어서, 429를 받은 키만 느려지고
 새 요청은 지금 가장 빨리 보낼 수 있는 키로 간다. 크레딧/토큰이 떨어진 키는 빠지고 남은 키가 이어받는다(`ikgr_core/key_pool.py`).
 Luxia 제한이 **키 단위**면 키 개수만큼 빨라지고, **계정 단위**(같은 계정의 키들)면 총 처리량은 비슷하고 429만 늘어난다.
@@ -217,6 +221,8 @@ Luxia 제한이 **키 단위**면 키 개수만큼 빨라지고, **계정 단위
 LUXIA_API_KEY=첫번째키
 LUXIA_API_KEY_2=두번째키
 LUXIA_API_KEY_3=세번째키
+LUXIA_API_KEY_4=예비키1     # 위 키 중 하나가 소진되면 투입
+LUXIA_API_KEY_5=예비키2
 ```
 
 | 응답 | 판단 | 동작 |

@@ -1,12 +1,16 @@
 """
 Per-API-key request lanes for the paid LLM stages (step1 / step2).
 
-  IKGR_LLM_KEY_MODE=parallel   (default) every usable key is called at the same time. Each key has
-                               its own pacing (rate_limit.SharedRateLimiter: 429 cooldown, AIMD
-                               interval) and at most IKGR_LLM_WORKERS_PER_KEY requests in flight
-                               (default 8), so the thread pool is workers_per_key x keys. A 429
-                               slows down only the key that got it; an exhausted key drops out and
-                               its requests move to the remaining keys.
+  IKGR_LLM_KEY_MODE=parallel   (default) the first IKGR_LLM_ACTIVE_KEYS usable keys (default 3) are
+                               called at the same time. Each key has its own pacing
+                               (rate_limit.SharedRateLimiter: 429 cooldown, AIMD interval) and at most
+                               IKGR_LLM_WORKERS_PER_KEY requests in flight (default 8), so the thread
+                               pool is workers_per_key x active keys. A 429 slows down only the key
+                               that got it. Keys beyond the active ones (e.g. LUXIA_API_KEY_4 / _5)
+                               are STANDBY: unused until an active key is exhausted, then the next
+                               standby key (in .env order) takes over its share. With no standby
+                               left, an exhausted key's requests move to the remaining keys.
+                               IKGR_LLM_ACTIVE_KEYS=0 = every key at once.
   IKGR_LLM_KEY_MODE=sequential the earlier behaviour: one key at a time (the first usable one), the
                                next key only after it is exhausted; all workers share its pacing.
   IKGR_STEP1_WORKERS / IKGR_STEP2_WORKERS, when set, fix the TOTAL number of worker threads
@@ -41,21 +45,36 @@ class Lane:
 
 
 class KeyLanes:
-    def __init__(self, pool, mode=None, workers_per_key=None, total_workers=None):
+    def __init__(self, pool, mode=None, workers_per_key=None, total_workers=None, active_keys=None):
         self.pool = pool
         self.mode = (mode or os.environ.get("IKGR_LLM_KEY_MODE", "parallel")).strip().lower()
         if self.mode not in ("parallel", "sequential"):
             raise ValueError(f"IKGR_LLM_KEY_MODE must be 'parallel' or 'sequential', not {self.mode!r}")
         n = len(pool)
         if self.mode == "parallel":
+            active = int(active_keys if active_keys is not None
+                         else os.environ.get("IKGR_LLM_ACTIVE_KEYS", "3") or 3)
+            self.active = n if active <= 0 else min(active, n)
             per_key = workers_per_key or int(os.environ.get("IKGR_LLM_WORKERS_PER_KEY", "8"))
-            self.workers = int(total_workers or per_key * n)
-            self.cap = max(1, -(-self.workers // n))          # in-flight requests allowed per key
+            self.workers = int(total_workers or per_key * self.active)
+            self.cap = max(1, -(-self.workers // self.active))   # in-flight requests allowed per key
         else:
+            self.active = 1
             self.workers = int(total_workers or 8)
             self.cap = self.workers
         self.lanes = [Lane(i) for i in range(n)]
         self._cv = threading.Condition()
+        self._started = {ln.idx for ln in self._active_lanes()}   # keys that have been active so far
+
+    def _active_lanes(self):
+        """The usable keys in use now: the first `active` ones in .env order (the rest are standby)."""
+        return [self.lanes[i] for i in self.pool.usable()[:self.active]]
+
+    def _announce_takeovers(self, active):
+        for ln in active:
+            if ln.idx not in self._started:
+                self._started.add(ln.idx)
+                print(f"\n[llm-keys] standby {self.pool.name(ln.idx)} takes over from an exhausted key", flush=True)
 
     # ---- choosing a key -------------------------------------------------------------------------
     @contextmanager
@@ -66,11 +85,10 @@ class KeyLanes:
         with self._cv:
             while True:
                 now = time.monotonic()
-                usable = [self.lanes[i] for i in self.pool.usable()]
+                usable = self._active_lanes()
                 if not usable:
                     raise AllKeysExhausted(self.pool.summary())
-                if self.mode == "sequential":
-                    usable = usable[:1]
+                self._announce_takeovers(usable)
                 free = [ln for ln in usable if ln.inflight < self.cap]
                 if free:
                     lane = min(free, key=lambda ln: (max(now, ln.limiter.ready_at()), ln.inflight,
@@ -93,9 +111,8 @@ class KeyLanes:
     # ---- reporting ------------------------------------------------------------------------------
     @property
     def min_interval_seconds(self):
-        """Largest current pacing interval among the usable keys (progress log column paced_s)."""
-        usable = self.pool.usable()
-        return max((self.lanes[i].limiter.min_interval_seconds for i in usable), default=0.0)
+        """Largest current pacing interval among the active keys (progress log column paced_s)."""
+        return max((ln.limiter.min_interval_seconds for ln in self._active_lanes()), default=0.0)
 
     def name(self, lane):
         return self.pool.name(lane.idx)
@@ -103,24 +120,32 @@ class KeyLanes:
     def describe(self):
         n = len(self.lanes)
         if self.mode == "parallel":
-            return (f"parallel over {n} key(s): up to {self.cap} request(s) in flight per key, "
-                    f"{self.workers} worker threads (IKGR_LLM_KEY_MODE=sequential for one key at a time)")
+            standby = (f" + {n - self.active} standby key(s) that take over when an active key is exhausted"
+                       if n > self.active else "")
+            return (f"parallel over {self.active} key(s){standby}: up to {self.cap} request(s) in flight per "
+                    f"key, {self.workers} worker threads (IKGR_LLM_KEY_MODE=sequential for one key at a time)")
         return f"sequential: one key at a time ({n} configured), {self.workers} worker threads"
 
     def status(self):
         """Pool status + per-key pacing and counters, e.g. for the progress log."""
         usable = set(self.pool.usable())
+        active = {ln.idx for ln in self._active_lanes()}
         per = []
         for ln in self.lanes:
-            if ln.ok or ln.n429 or ln.idx in usable:
-                state = f"{ln.limiter.min_interval_seconds:.2f}s" if ln.idx in usable else "exhausted"
-                per.append(f"#{ln.idx + 1} {state} {ln.ok}ok/{ln.n429}x429")
+            if ln.idx in active:
+                per.append(f"#{ln.idx + 1} {ln.limiter.min_interval_seconds:.2f}s {ln.ok}ok/{ln.n429}x429")
+            elif ln.idx in usable:
+                per.append(f"#{ln.idx + 1} standby")
+            elif ln.ok or ln.n429:
+                per.append(f"#{ln.idx + 1} exhausted {ln.ok}ok/{ln.n429}x429")
         return f"{len(self.lanes)} key(s), {len(self.lanes) - len(usable)} exhausted, {self.mode}: " + " | ".join(per)
 
     def per_key(self):
+        active = {ln.idx for ln in self._active_lanes()}
         return [{"key": f"#{ln.idx + 1}", "ok": ln.ok, "n429": ln.n429,
                  "paced_interval_s": ln.limiter.min_interval_seconds,
-                 "exhausted": not self.pool.is_usable(ln.idx)} for ln in self.lanes]
+                 "exhausted": not self.pool.is_usable(ln.idx),
+                 "standby": self.pool.is_usable(ln.idx) and ln.idx not in active} for ln in self.lanes]
 
 
 def chat_with_retry(llm, lanes, progress, sys_prompt, prompt, max_retries, initial_delay):

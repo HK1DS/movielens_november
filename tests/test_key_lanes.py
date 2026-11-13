@@ -29,6 +29,7 @@ from ikgr_core.key_lanes import KeyLanes  # noqa: E402
 from ikgr_core.key_pool import AllKeysExhausted, KeyPool  # noqa: E402
 
 KA, KB, KC = "key-aaaa-1111", "key-bbbb-2222", "key-cccc-3333"
+KD, KE = "key-dddd-4444", "key-eeee-5555"                          # standby keys (LUXIA_API_KEY_4 / _5)
 FAKE_ENV = ("FAKE_LLM_KEY_BUDGET", "FAKE_LLM_EXHAUSTED_KEYS", "FAKE_LLM_EXHAUSTED_STYLE", "FAKE_LLM_429_KEYS",
             "FAKE_LLM_DELAY")
 
@@ -44,7 +45,7 @@ def clean_env(monkeypatch):
 
 
 def _lanes(mode=None, total=None, n=3):
-    return KeyLanes(KeyPool([KA, KB, KC][:n], "TEST"), mode=mode, total_workers=total)
+    return KeyLanes(KeyPool([KA, KB, KC, KD, KE][:n], "TEST"), mode=mode, total_workers=total)
 
 
 def _picks(lanes, n):
@@ -111,6 +112,42 @@ def test_sequential_mode_uses_one_key_at_a_time():
         assert {st.enter_context(lanes.lease()).idx for _ in range(4)} == {0}
     lanes.pool.mark_exhausted(0, "test")
     assert set(_picks(lanes, 3)) == {1}
+
+
+def test_keys_beyond_the_active_three_stand_by_until_one_runs_out(monkeypatch):
+    monkeypatch.setenv("IKGR_LLM_WORKERS_PER_KEY", "2")
+    lanes = _lanes(n=5)
+    assert lanes.active == 3 and lanes.workers == 6 and lanes.cap == 2      # sized for the 3 active keys
+    assert "parallel over 3 key(s) + 2 standby" in lanes.describe()
+    assert set(_picks(lanes, 9)) == {0, 1, 2}
+    assert "#4 standby" in lanes.status() and "#5 standby" in lanes.status()
+    lanes.lanes[1].ok = 7                                                    # key #2 did some work, then
+    lanes.pool.mark_exhausted(1, "test")                                     # runs out -> #4 takes over
+    assert set(_picks(lanes, 9)) == {0, 2, 3}
+    st = lanes.status()
+    assert "#2 exhausted 7ok" in st and "#4 0.00s" in st and "#5 standby" in st
+    lanes.pool.mark_exhausted(2, "test")                                     # key #3 runs out -> #5
+    assert set(_picks(lanes, 9)) == {0, 3, 4}
+    lanes.pool.mark_exhausted(0, "test")                                     # no standby left: 2 keys carry on
+    assert set(_picks(lanes, 4)) == {3, 4}
+    per = {k["key"]: k for k in lanes.per_key()}
+    assert per["#4"]["standby"] is False and per["#1"]["exhausted"] is True
+
+
+def test_active_keys_setting(monkeypatch):
+    monkeypatch.setenv("IKGR_LLM_ACTIVE_KEYS", "0")                          # 0 = every key at once
+    assert set(_picks(_lanes(n=5), 10)) == {0, 1, 2, 3, 4}
+    monkeypatch.setenv("IKGR_LLM_ACTIVE_KEYS", "2")
+    lanes = _lanes(n=3)
+    assert set(_picks(lanes, 6)) == {0, 1} and "#3 standby" in lanes.status()
+    monkeypatch.setenv("IKGR_LLM_ACTIVE_KEYS", "3")
+    assert _lanes(n=2).active == 2                                           # fewer keys than active slots
+
+
+def test_empty_standby_slots_in_env_are_ignored():
+    from ikgr_core.key_pool import collect_keys
+    env = {"LXK": KA, "LXK_2": KB, "LXK_3": KC, "LXK_4": "", "LXK_5": " "}
+    assert collect_keys("LXK", env) == [KA, KB, KC]
 
 
 # ---- step1 end to end with the offline fake LLM -----------------------------------------------------
@@ -180,6 +217,25 @@ def test_rate_limited_key_only_slows_itself(server, tmp_path):
     assert per["#1"]["ok"] == 0 and per["#1"]["n429"] >= 1 and per["#1"]["paced_interval_s"] >= 0.2
     assert per["#2"]["paced_interval_s"] == 0.0 == per["#3"]["paced_interval_s"]
     assert time.time() - t0 < 60
+
+
+def test_standby_key_takes_over_when_an_active_key_runs_out(server, tmp_path):
+    os.environ["FAKE_LLM_DELAY"] = "0.02"
+    os.environ["FAKE_LLM_KEY_BUDGET"] = f"{KB}:4"                       # key #2 runs out after 4 calls
+    env = dict(_step1_env(tmp_path, server), TEST_LXK_4=KD, TEST_LXK_5=KE)
+    rc, out = _run_step1(env)
+    assert rc == 0, out[-3000:]
+    assert "parallel over 3 key(s) + 2 standby key(s)" in out
+    assert "TEST_LXK key #2/5 (...2222) exhausted" in out
+    assert "[llm-keys] standby TEST_LXK key #4/5 (...4444) takes over" in out
+    used = Counter(fake_llm_server.KEY_LOG)
+    assert used[KD] >= 1 and KE not in used                           # #5 still waits in reserve
+    cache = json.load(open(tmp_path / "run" / "step1_cache.json", encoding="utf-8"))
+    assert len(cache["user"]) == 30 and len(cache["item"]) == 10
+    tp = json.load(open(tmp_path / "run" / "step1_throughput.json", encoding="utf-8"))
+    per = {k["key"]: k for k in tp["per_key"]}
+    assert per["#2"]["exhausted"] and per["#5"]["standby"] and per["#5"]["ok"] == 0
+    assert KD not in out and KE not in out
 
 
 def test_sequential_mode_env_keeps_one_key(server, tmp_path):
