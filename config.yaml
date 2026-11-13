@@ -60,5 +60,9 @@ recbole:
   reg_weight: 0.000001
   lambda_mix: 0.1                   # lambda in Eq. (11)
   embedding_size: 64                # shared by every spec (512 made true LightGCN ~24 min/epoch on Goodreads k=30)
+  train_batch_size: 8192            # shared by every spec. LightGCN-backbone specs propagate the WHOLE graph once per
+                                    # batch, so epoch time ~ number of batches (RTX 3060 Ti, TO, csr: 2048 -> 39 min/epoch,
+                                    # 8192 -> 9.8). 8192 x 40 epochs ~ as many updates as the earlier repo (2048 x 12).
+  sparse_format: csr                # LightGCN adjacency: csr (2.9x faster than coo on GPU, identical math; tested)
   gcn_layers: 1
   dropout: 0.1

@@ -102,6 +102,7 @@ class IKGR(GeneralRecommender):
         # facets are added on top of the propagated representations instead of the
         # raw MF embeddings. lgcn_layers=0 (default) leaves every existing spec unchanged.
         self.lgcn_layers = int(_cfg(config, "lgcn_layers", 0))
+        self.sparse_format = str(_cfg(config, "sparse_format", "coo") or "coo").lower()   # coo | csr
         if self.lgcn_layers > 0 and (self.use_corona or self.profile_attn
                                      or (bool(_cfg(config, "use_kg", True)) and int(_cfg(config, "kg_layers", 1)) >= 2)):
             raise ValueError("lgcn_layers > 0 is only supported with the default additive fusion "
@@ -300,8 +301,8 @@ class IKGR(GeneralRecommender):
     def _lgcn_adj(self):
         dev = self.user_embedding.weight.device
         if self._adj is None or self._adj.device != dev:
-            self._adj = torch.sparse_coo_tensor(self._adj_idx, self._adj_val,
-                                                self._adj_shape).coalesce().to(dev)
+            adj = torch.sparse_coo_tensor(self._adj_idx, self._adj_val, self._adj_shape).coalesce().to(dev)
+            self._adj = adj.to_sparse_csr() if self.sparse_format == "csr" else adj
         return self._adj
 
     def _lgcn_all(self):

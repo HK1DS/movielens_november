@@ -242,6 +242,15 @@ LLM 단계는 API PC 한 대에서 돌리고, 팀원은 E 단계만 seed를 나�
 | `scripts/unpack_data_bundle.py` | 팀원 | sha256 확인 후 복원 (`--split TO`, `--check`) |
 | `scripts/merge_results.py --split TO --inputs a.zip b_dir ...` | 결과 모으는 사람 | 팀원별 `slice_eval_<SPLIT>_result.json` + `per_user_<SPLIT>/`(폴더 또는 zip)를 합침. `run_signature`가 다르면(다른 코드·데이터·프로토콜로 평가) 합치지 않고 이유를 출력 |
 
+**학습 설정 (2026-11-13):** 모든 spec 공통으로 배치 8192, LightGCN 인접행렬 CSR(`config.yaml`의 `train_batch_size`, `sparse_format`;
+`run_pipeline.py --batch / --sparse`, env `IKGR_BATCH / IKGR_SPARSE`). LightGCN 계열(`LightGCN`, `IKGR_lgcn_*`)은 배치마다
+그래프 전체(MovieLens TO 약 3,900만 엔트리)를 전파해서 epoch 시간이 배치 개수에 비례한다. RTX 3060 Ti 실측
+(`scripts\benchmark_speed.bat` → `scripts/benchmark_train_speed.py`): LightGCN 2048·COO 114분/epoch(40 epoch 76시간),
+2048·CSR 39분, **8192·CSR 9.8분(6.5시간)**, 16384·CSR 5.0분. CSR은 COO와 계산이 같다(`tests/test_lgcn_backbone.py`).
+8192 × 40 epoch은 이전 MovieLens 레포(2048 × 12 epoch)와 업데이트 횟수가 비슷하다. 참고: 이전 레포의 `LightGCN`은
+그래프 전파가 실제로 일어났다면 512차원·12 epoch으로 seed당 60시간이 넘었을 텐데, 전체 평가가 31시간에 끝났다
+(그 레포의 `dok_matrix._update = dict.update` shim은 SciPy ≥ 1.13에서 인접행렬을 비운다) → 그 수치는 전파 없는 변형일 가능성이 크다.
+
 평가 서명(`eval_slices.py`, schema 4)은 기계와 무관하다: spec이 실제로 읽는 데이터 파일만(intent spec: provenance + `kg_pack.pt`,
 메타 KG spec: `meta_kg_pack.pt`), 그 **내용**으로 해시하고(.gz는 압축 해제 후, .pt는 텐서 값), 코드는 줄바꿈을 정규화해서,
 경로는 레포 기준 상대경로로 기록한다. 그래서 intent 없는 spec 결과는 나중에 `kg_pack.pt`가 생겨도 무효화되지 않고,

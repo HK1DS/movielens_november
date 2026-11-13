@@ -47,3 +47,6 @@
 - 2026-11-13: TO step2 진행 중(GPU로 RAG 입력 생성 936초, 이후 재개는 GPU 안 씀). 팀원 분담 준비 — `team-mate` 브랜치 `TODO.md`,
   평가 서명 schema 4(spec이 읽는 파일만·내용 해시·줄바꿈 정규화·상대경로 → 팀원 seed 병합 가능, intent 없는 결과가 `kg_pack.pt` 도착 후에도 유지),
   `scripts/pack_data_bundle.py` / `unpack_data_bundle.py`(Goodreads식 95MB 분할) / `merge_results.py`.
+- 2026-11-13: GPU 실측(RTX 3060 Ti) — LightGCN 계열은 배치마다 그래프 전체 전파라 2048·COO에서 40 epoch 76시간.
+  공통 프로토콜을 **배치 8192 + CSR 인접행렬**로 변경(LightGCN 6.5시간/run, 계산 동일성 테스트). 분담 변경: 은선 = intent 없는 5개 spec
+  전부(지금 시작), 진욱 = API + intent spec 2개. `scripts/benchmark_train_speed.py`(+ `benchmark_speed.bat`)로 GPU별 속도 측정.
