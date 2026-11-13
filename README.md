@@ -232,6 +232,23 @@ LUXIA_API_KEY_3=세번째키
 - 키는 로그에 `#2/3 (...끝4자리)`로만 표시된다. 소진 상태는 프로세스 안에서만 유지되고, 재실행하면 1번 키부터 다시 확인한다(충전된 키 자동 재사용).
 - 각 단계 시작 시 `[step1] API keys: parallel over 3 key(s): up to 8 request(s) in flight per key, 24 worker threads`가 찍힌다.
 
+### 팀원과 나눠 돌리기 (GPU, E 단계)
+
+LLM 단계는 API PC 한 대에서 돌리고, 팀원은 E 단계만 seed를 나눠 돌린다. 할 일 목록은 `team-mate` 브랜치의 `TODO.md`.
+
+| 스크립트 | 누가 | 하는 일 |
+|---|---|---|
+| `scripts/pack_data_bundle.py --split TO` | API PC (D 끝난 뒤) | 평가 입력(TO는 공용 `.inter` 포함, 프로필·provenance, `kg_pack.pt`, `meta_kg_pack.pt`)을 `data_bundle/`에 95MB 분할 tgz + sha256 + 파일 목록으로 묶음. git으로 전달 (Goodreads와 같은 방식). `interactions_k30.csv`는 `.inter`와 같은 내용이라 제외 |
+| `scripts/unpack_data_bundle.py` | 팀원 | sha256 확인 후 복원 (`--split TO`, `--check`) |
+| `scripts/merge_results.py --split TO --inputs a.zip b_dir ...` | 결과 모으는 사람 | 팀원별 `slice_eval_<SPLIT>_result.json` + `per_user_<SPLIT>/`(폴더 또는 zip)를 합침. `run_signature`가 다르면(다른 코드·데이터·프로토콜로 평가) 합치지 않고 이유를 출력 |
+
+평가 서명(`eval_slices.py`, schema 4)은 기계와 무관하다: spec이 실제로 읽는 데이터 파일만(intent spec: provenance + `kg_pack.pt`,
+메타 KG spec: `meta_kg_pack.pt`), 그 **내용**으로 해시하고(.gz는 압축 해제 후, .pt는 텐서 값), 코드는 줄바꿈을 정규화해서,
+경로는 레포 기준 상대경로로 기록한다. 그래서 intent 없는 spec 결과는 나중에 `kg_pack.pt`가 생겨도 무효화되지 않고,
+팀원 PC마다 다시 만든 같은 내용의 파일도 같은 서명을 낸다.
+
+`scripts\intent_global_step1_7h.bat` / `intent_global_run_7h.bat`: TO_GLOBAL의 step1만 / step1→step2→D (step2의 첫 GPU 인코딩은 낮에).
+
 ## 6. 테스트
 
 ```bash

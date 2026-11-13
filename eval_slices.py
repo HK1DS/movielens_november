@@ -32,7 +32,7 @@ Env overrides:
   IKGR_DUMP_VALID=1               also dump per-user VALIDATION metrics (for gate/selection work)
   IKGR_REQUIRE_PROVENANCE=1       refuse to run KG specs without a profile provenance file
 """
-import os, json, time, math, yaml, hashlib, random
+import os, json, time, math, yaml, hashlib, random, gzip
 import scipy.sparse as _sp
 if not hasattr(_sp.dok_matrix, "_update"):
     # RecBole 1.2.0 builds LightGCN's normalized adjacency with dok_matrix._update(),
@@ -58,7 +58,9 @@ from ikgr_core.model_ikgr import IKGR as IKGRModel
 KS = [10, 30]
 MAXK = max(KS)
 COV_K = 10
-EVAL_SCHEMA_VERSION = 3   # 3: train-only pop/activity, early stopping, leakage guard
+EVAL_SCHEMA_VERSION = 4   # 3: train-only pop/activity, early stopping, leakage guard
+                          # 4: machine-independent signature (only the data files a spec uses, content-based
+                          #    hashes, EOL-normalised code, repo-relative paths) so teammates' seeds can be merged
 
 
 def _set_determinism(seed):
@@ -96,15 +98,82 @@ def _protocol(rb):
 _SHA_MEMO = {}
 
 
+def _canonical_update(h, obj):
+    """Feed a loaded KG pack (dicts / lists / tensors / arrays / scalars) into h, order-independently for dicts."""
+    import numpy as _np
+    try:
+        import torch as _torch
+    except Exception:
+        _torch = None
+    if _torch is not None and isinstance(obj, _torch.Tensor):
+        obj = obj.detach().cpu().contiguous().numpy()
+    if isinstance(obj, _np.ndarray):
+        a = _np.ascontiguousarray(obj)
+        h.update(f"nd|{a.dtype.str}|{a.shape}|".encode())
+        h.update(a.tobytes())
+    elif isinstance(obj, dict):
+        h.update(f"dict|{len(obj)}|".encode())
+        for k in sorted(obj, key=lambda x: repr(x)):
+            h.update(repr(k).encode("utf-8"))
+            _canonical_update(h, obj[k])
+    elif isinstance(obj, (list, tuple)):
+        h.update(f"{type(obj).__name__}|{len(obj)}|".encode())
+        for v in obj:
+            _canonical_update(h, v)
+    else:
+        h.update(f"{type(obj).__name__}|{obj!r}|".encode("utf-8"))
+
+
 def _file_sha256(path, chunk=1 << 22):
+    """Content fingerprint that ignores byte-level noise between machines / rebuilds:
+    .gz -> hash of the decompressed bytes (gzip headers carry a timestamp),
+    .pt -> hash of the loaded tensors and values (torch.save bytes can differ across versions),
+    anything else -> raw bytes."""
     key = (os.path.abspath(path), os.path.getsize(path), os.path.getmtime(path))
     if key not in _SHA_MEMO:
         h = hashlib.sha256()
-        with open(path, "rb") as f:
-            for block in iter(lambda: f.read(chunk), b""):
-                h.update(block)
+        if path.endswith(".pt"):
+            import torch
+            try:
+                obj = torch.load(path, map_location="cpu", weights_only=False)
+            except TypeError:                                   # torch < 1.13
+                obj = torch.load(path, map_location="cpu")
+            _canonical_update(h, obj)
+        else:
+            opener = gzip.open if path.endswith(".gz") else open
+            with opener(path, "rb") as f:
+                for block in iter(lambda: f.read(chunk), b""):
+                    h.update(block)
         _SHA_MEMO[key] = h.hexdigest()[:16]
     return _SHA_MEMO[key]
+
+
+def _code_sha256(path):
+    """Source hash with line endings normalised (a Windows checkout may turn LF into CRLF)."""
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read().replace(b"\r\n", b"\n")).hexdigest()
+
+
+def _portable(value):
+    """Absolute paths inside a spec's options -> repo-relative, forward slashes (same on every machine)."""
+    if isinstance(value, str) and os.path.isabs(value):
+        try:
+            return os.path.relpath(value).replace("\\", "/")
+        except ValueError:                                      # other drive on Windows
+            return os.path.basename(value)
+    return value
+
+
+def _spec_data_files(extra):
+    """The data files a spec actually reads: only these enter its fingerprint."""
+    uses_intents = bool(extra.get("use_kg")) or bool(extra.get("kg_pack_path") and (
+        extra.get("corona_cand") or extra.get("corona_rerank_grid")))
+    keys = []
+    if uses_intents:
+        keys += ["profile_provenance", "kg_pack"]
+    if extra.get("use_meta_kg"):
+        keys.append("meta_kg_pack")
+    return keys
 
 
 def _experiment_context(name, model_arg, extra, rb, paths, split):
@@ -112,15 +181,16 @@ def _experiment_context(name, model_arg, extra, rb, paths, split):
     source_paths = [__file__, "ikgr_core/model_ikgr.py", "ikgr_core/corona_retriever.py"]
     code = {}
     for path in source_paths:
+        rel = _portable(os.path.abspath(path))
         try:
-            with open(path, "rb") as f:
-                code[path] = hashlib.sha256(f.read()).hexdigest()
+            code[rel] = _code_sha256(path)
         except OSError:
-            code[path] = None
-    # Content hashes (not mtimes): re-creating identical inputs on resume must not
-    # invalidate finished seeds; genuinely changed inputs must.
+            code[rel] = None
+    # Content hashes (not mtimes) of only the files this spec reads: re-creating identical inputs on resume,
+    # rebuilding them on another machine, or adding a KG pack a spec does not use must not invalidate
+    # finished seeds; genuinely changed inputs must.
     data_fp = {}
-    for key in ("profile_provenance", "kg_pack", "meta_kg_pack"):
+    for key in _spec_data_files(extra):
         p = paths.get(key)
         if p and os.path.exists(p):
             data_fp[key] = _file_sha256(p)
@@ -130,8 +200,8 @@ def _experiment_context(name, model_arg, extra, rb, paths, split):
         "model": model_arg if isinstance(model_arg, str) else model_arg.__name__,
         "split": split,
         "protocol": _protocol(rb),
-        "extra": extra,
-        "paths": paths,
+        "extra": {k: _portable(v) for k, v in extra.items()},
+        "paths": {k: _portable(v) for k, v in paths.items()},
         "data_fingerprint": data_fp,
         "recbole": rb,
         "code": code,

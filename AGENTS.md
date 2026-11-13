@@ -44,3 +44,6 @@
 - 2026-11-12: TO step1 완료(유저 133,200 + 아이템 15,784). step2 재작성 — RAG 입력(어휘·임베딩·프로필별 top-k 후보)을
   split마다 한 번 만들어 `rag_manifest.json`과 함께 고정, 재개 시 재인코딩 없음. 근사 인덱스(Annoy/sklearn) 대신 정확한 코사인 top-k,
   인코더는 GPU(`IKGR_ENCODER_DEVICE`). step1 결과가 바뀌면 exit 2(어휘 혼합 방지). launcher에 `-PaidSteps`(예: B만).
+- 2026-11-13: TO step2 진행 중(GPU로 RAG 입력 생성 936초, 이후 재개는 GPU 안 씀). 팀원 분담 준비 — `team-mate` 브랜치 `TODO.md`,
+  평가 서명 schema 4(spec이 읽는 파일만·내용 해시·줄바꿈 정규화·상대경로 → 팀원 seed 병합 가능, intent 없는 결과가 `kg_pack.pt` 도착 후에도 유지),
+  `scripts/pack_data_bundle.py` / `unpack_data_bundle.py`(Goodreads식 95MB 분할) / `merge_results.py`.
