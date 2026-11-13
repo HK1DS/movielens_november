@@ -51,11 +51,16 @@ class SharedRateLimiter:
             raise ValueError("IKGR_LLM_429_MIN_INTERVAL_SECONDS must be non-negative")
         self.recover_every = int(os.environ.get("IKGR_LLM_PACE_RECOVER_EVERY", "200"))
         self.recover_factor = float(os.environ.get("IKGR_LLM_PACE_RECOVER_FACTOR", "0.75"))
+        # Also relax after this many 429-free SECONDS (with at least one success in between): a slow key
+        # (e.g. 10 s interval = 0.1 calls/s) would otherwise need ~2,000 s per relax step and stay throttled
+        # for hours, e.g. after another key ran out of credit. 0 = count-based only.
+        self.recover_seconds = float(os.environ.get("IKGR_LLM_PACE_RECOVER_SECONDS", "60"))
         self.max_interval_seconds = 10.0
         self._lock = threading.Lock()
         self._next_allowed = 0.0
         self._cooldown_until = 0.0
         self._streak = 0
+        self._last_change = time.monotonic()      # last 429 escalation or relax step
 
     def acquire(self) -> None:
         """Wait until this worker may start its next API request."""
@@ -88,6 +93,7 @@ class SharedRateLimiter:
             self._cooldown_until = max(self._cooldown_until, now + max(0.0, seconds))
             self._streak = 0
             previous = self.min_interval_seconds
+            self._last_change = now
             if previous > 0 and not same_burst:
                 self.min_interval_seconds = min(previous * 1.5, self.max_interval_seconds)
             self.min_interval_seconds = max(self.min_interval_seconds, self.fallback_interval_seconds)
@@ -96,15 +102,17 @@ class SharedRateLimiter:
     def note_success(self) -> Optional[float]:
         """Count a successful call; after a 429-free streak relax the pacing interval.
         Returns the new interval when it changed, else None."""
-        if self.recover_every <= 0:
-            return None
         with self._lock:
             if self.min_interval_seconds <= 0:
                 return None
             self._streak += 1
-            if self._streak < self.recover_every:
+            now = time.monotonic()
+            by_count = self.recover_every > 0 and self._streak >= self.recover_every
+            by_time = self.recover_seconds > 0 and now - self._last_change >= self.recover_seconds
+            if not (by_count or by_time):
                 return None
             self._streak = 0
+            self._last_change = now
             new = self.min_interval_seconds * self.recover_factor
             self.min_interval_seconds = 0.0 if new < 0.05 else new
             return self.min_interval_seconds
