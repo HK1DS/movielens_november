@@ -92,6 +92,11 @@ def _protocol(rb):
         "valid_metric": os.environ.get("IKGR_VALID_METRIC", rb.get("valid_metric", "NDCG@10")),
         "learning_rate": float(os.environ.get("IKGR_LR", rb.get("learning_rate", 1e-3))),
         "reg_weight": float(os.environ.get("IKGR_REG", rb.get("reg_weight", 1e-6))),
+        # Training batch size: LightGCN-backbone specs propagate the WHOLE graph once per batch, so on
+        # MovieLens-25M (~39M adjacency entries) the epoch time is ~ n_batches x graph size.
+        "train_batch_size": int(os.environ.get("IKGR_BATCH", rb.get("train_batch_size", 2048))),
+        # Sparse format of the LightGCN adjacency (coo | csr): same math, csr is usually faster on GPU.
+        "sparse_format": os.environ.get("IKGR_SPARSE", rb.get("sparse_format", "coo")).lower(),
     }
 
 
@@ -235,6 +240,7 @@ def _config(rb, paths, extra, seed):
         "metrics": rb["metrics"], "topk": rb["topk"],
         "embedding_size": rb["embedding_size"], "learning_rate": proto["learning_rate"],
         "reg_weight": proto["reg_weight"],
+        "train_batch_size": proto["train_batch_size"], "sparse_format": proto["sparse_format"],
         "dropout_prob": rb.get("dropout", 0.1),
         "data_path": os.path.dirname(paths["inter_file"]),
         "USER_ID_FIELD": "user_id", "ITEM_ID_FIELD": "item_id", "LABEL_FIELD": "rating",
@@ -258,6 +264,16 @@ def _config(rb, paths, extra, seed):
                            "group_by": None, "mode": "full"}
     cd.update(extra)
     return cd
+
+
+def _apply_sparse_format(model, config):
+    """RecBole's LightGCN keeps its normalised adjacency as COO; switch it to CSR when the protocol says so
+    (IKGR's own LightGCN backbone reads `sparse_format` itself)."""
+    fmt = str(config["sparse_format"] or "coo").lower()
+    if fmt not in ("coo", "csr"):
+        raise ValueError(f"sparse_format must be coo or csr, not {fmt!r}")
+    if fmt == "csr" and hasattr(model, "norm_adj_matrix") and model.norm_adj_matrix.layout == torch.sparse_coo:
+        model.norm_adj_matrix = model.norm_adj_matrix.coalesce().to_sparse_csr()
 
 
 def _build_recency(model, train_data, config):
@@ -456,6 +472,7 @@ def _train_and_collect(model_arg, extra, rb, paths, seed, split):
     item_pop, user_act = _train_stats(train_data, config)
     klass = model_arg if not isinstance(model_arg, str) else get_model(config["model"])
     model = klass(config, train_data.dataset).to(config["device"])
+    _apply_sparse_format(model, config)
     if getattr(model, "use_dynamic", False):
         _build_recency(model, train_data, config)
     retriever = None

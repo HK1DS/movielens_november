@@ -112,3 +112,36 @@ def test_facet_variant_trains(data):
     cfg_c, _, train_c = data(IKGR, {"use_kg": False, "lgcn_layers": 2, "use_corona": True})
     with pytest.raises(ValueError):
         IKGR(cfg_c, train_c.dataset)
+
+
+def test_csr_adjacency_matches_coo(data):
+    """sparse_format=csr (faster SpMM on GPU) must give the same loss, gradients and scores as coo."""
+    from recbole.data.interaction import Interaction
+    from recbole.utils import get_model
+    from ikgr_core.model_ikgr import IKGR
+    import eval_slices
+    LightGCN = get_model("LightGCN")
+    for klass, extra in ((LightGCN, {}), (IKGR, {"use_kg": False, "lgcn_layers": 2})):
+        out = {}
+        for fmt in ("coo", "csr"):
+            cfg, _, train = data(klass, dict(extra, sparse_format=fmt))
+            assert cfg["sparse_format"] == fmt and cfg["train_batch_size"] == 2048
+            torch.manual_seed(0)
+            m = klass(cfg, train.dataset)
+            eval_slices._apply_sparse_format(m, cfg)
+            if klass is LightGCN:
+                assert m.norm_adj_matrix.layout == (torch.sparse_csr if fmt == "csr" else torch.sparse_coo)
+            uid, iid = cfg["USER_ID_FIELD"], cfg["ITEM_ID_FIELD"]
+            batch = Interaction({uid: torch.tensor([1, 2, 3]), iid: torch.tensor([1, 2, 3]),
+                                 m.NEG_ITEM_ID: torch.tensor([4, 5, 6])})
+            loss = m.calculate_loss(batch)
+            loss = sum(loss) if isinstance(loss, tuple) else loss
+            loss.backward()
+            m.eval()
+            with torch.no_grad():
+                if klass is IKGR:
+                    m.eval_cache_items()
+                scores = m.full_sort_predict(Interaction({uid: torch.arange(1, 6)}))
+            out[fmt] = (loss.detach(), m.user_embedding.weight.grad.clone(), scores)
+        for a, b in zip(out["coo"], out["csr"]):
+            assert torch.allclose(a, b, atol=1e-5)

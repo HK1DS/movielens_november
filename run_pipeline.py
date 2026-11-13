@@ -230,6 +230,8 @@ def main():
     ap.add_argument("--force_prep", action="store_true",
                     help="rebuild stages 0/A/T/P even if their outputs exist (default: reuse)")
     ap.add_argument("--epochs", default="40", help="max epochs (early stopping on validation)")
+    ap.add_argument("--batch", default=None, help="training batch size for every spec (default: config.yaml recbole.train_batch_size)")
+    ap.add_argument("--sparse", default=None, choices=["coo", "csr"], help="LightGCN adjacency format (default: config.yaml)")
     ap.add_argument("--seeds", default="2020,2021,2022")
     ap.add_argument("--specs", default=DEFAULT_SPECS)
     ap.add_argument("--pop_grid", default="0.25,0.5,1.0",
@@ -372,6 +374,10 @@ def main():
     if "E" in steps:
         eenv = dict(env, IKGR_SPLIT=split, IKGR_EPOCHS=args.epochs, IKGR_SEEDS=args.seeds,
                     IKGR_SPECS=args.specs, IKGR_REQUIRE_PROVENANCE="1")
+        if args.batch:
+            eenv["IKGR_BATCH"] = str(int(args.batch))
+        if args.sparse:
+            eenv["IKGR_SPARSE"] = args.sparse
         if args.pop_grid:
             eenv["IKGR_POP_RERANK_GRID"] = args.pop_grid
         if args.dump_valid:
