@@ -50,7 +50,23 @@ def env(tmp_path_factory):
         ds = create_dataset(config)
         train, _, _ = data_preparation(config, ds)
         return config, train
-    return {"pack": pack_path, "build": build}
+    return {"pack": pack_path, "build": build, "cfg": cfg_path,
+            "inter": str(d / "kc" / "ikgr-custom" / "ikgr-custom.inter"), "dir": d}
+
+
+def test_build_is_identical_whatever_the_hash_seed(env):
+    """Node ids must not depend on Python's per-process set order: two teammates who build the pack on
+    their own machines must get the same content (eval signatures hash it)."""
+    import eval_slices
+    outs = []
+    for seed in ("1", "2", "3"):
+        out = env["dir"] / f"hs{seed}" / "meta_kg_pack.pt"
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "build_meta_kg.py"), "--config", env["cfg"],
+                            "--inter", env["inter"], "--out", str(out)],
+                           cwd=ROOT, capture_output=True, text=True, env=dict(os.environ, PYTHONHASHSEED=seed))
+        assert r.returncode == 0, r.stdout + r.stderr
+        outs.append(eval_slices._file_sha256(str(out)))
+    assert outs[0] == outs[1] == outs[2] == eval_slices._file_sha256(env["pack"])
 
 
 def test_pack_has_one_vocab_per_relation(env):

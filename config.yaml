@@ -64,5 +64,8 @@ recbole:
                                     # batch, so epoch time ~ number of batches (RTX 3060 Ti, TO, csr: 2048 -> 39 min/epoch,
                                     # 8192 -> 9.8). 8192 x 40 epochs ~ as many updates as the earlier repo (2048 x 12).
   sparse_format: csr                # LightGCN adjacency: csr (2.9x faster than coo on GPU, identical math; tested)
+  eval_batch_users: 128             # users per full-sort evaluation batch (valid + test). RecBole's default was ONE user
+                                    # per batch here (eval_batch_size 4096 < 15,786 items): TO validation 513 s -> 9.4 s
+                                    # (유은선 실측 11/14); metrics equal to 4 decimals, a few near-tied top-30 lists flip.
   gcn_layers: 1
   dropout: 0.1

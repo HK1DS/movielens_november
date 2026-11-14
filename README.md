@@ -257,6 +257,12 @@ LLM 단계는 API PC 한 대에서 돌리고, 팀원은 E 단계만 seed를 나�
 그래프 전파가 실제로 일어났다면 512차원·12 epoch으로 seed당 60시간이 넘었을 텐데, 전체 평가가 31시간에 끝났다
 (그 레포의 `dok_matrix._update = dict.update` shim은 SciPy ≥ 1.13에서 인접행렬을 비운다) → 그 수치는 전파 없는 변형일 가능성이 크다.
 
+**평가 배치 (2026-11-14):** `config.yaml`의 `eval_batch_users: 128`(env `IKGR_EVAL_USERS`) — 검증·테스트에서 한 번에 채점하는 유저 수.
+RecBole의 `eval_batch_size`는 유저×아이템 수라 기본값 4096이면 MovieLens(아이템 15,786개)에서 1명씩 평가되어 TO 검증 1회가
+약 10분 걸렸다(실측 513초 → 128명 9.4초). 점수는 배치와 무관하고 부동소수점 덧셈 순서만 달라서 지표는 소수점 4자리까지 같고,
+점수가 거의 같은 몇 명의 top-30 순서만 바뀐다(`tests/test_eval_batch.py`). 프로토콜(실행 서명)에 들어가므로 다른 값으로 돌린 결과와는 병합되지 않는다.
+메타 KG는 `build_meta_kg.py`가 아이템 id 순서로 만들어 누가 만들어도 같은 내용이다(`scripts/check_meta_kg.py`).
+
 평가 서명(`eval_slices.py`, schema 4)은 기계와 무관하다: spec이 실제로 읽는 데이터 파일만(intent spec: provenance + `kg_pack.pt`,
 메타 KG spec: `meta_kg_pack.pt`), 그 **내용**으로 해시하고(.gz는 압축 해제 후, .pt는 텐서 값), 코드는 줄바꿈을 정규화해서,
 경로는 레포 기준 상대경로로 기록한다. 그래서 intent 없는 spec 결과는 나중에 `kg_pack.pt`가 생겨도 무효화되지 않고,

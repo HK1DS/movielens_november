@@ -46,7 +46,11 @@ def main():
     print(f"[meta] target items: {len(item_set)}")
 
     adapter = load_adapter(args.config)
-    meta = adapter.load_items(item_set)
+    # Fixed item order (numeric ids numerically, others as text): node ids are assigned in the order items
+    # are visited, and a Python set's order changes with every process (PYTHONHASHSEED), so iterating
+    # item_set directly gave a differently numbered pack on every build (found 2026-11-14).
+    ordered = sorted(item_set, key=lambda t: (0, int(t), "") if t.isdigit() else (1, 0, t))
+    meta = adapter.load_items(ordered)
     print(f"[meta] adapter={adapter.name}: metadata for {len(meta)}/{len(item_set)} items")
     if not adapter.meta_relations:
         print("[meta] WARNING: adapter defines no meta_relations -> empty pack (meta-KG specs add nothing)")

@@ -97,6 +97,11 @@ def _protocol(rb):
         "train_batch_size": int(os.environ.get("IKGR_BATCH", rb.get("train_batch_size", 2048))),
         # Sparse format of the LightGCN adjacency (coo | csr): same math, csr is usually faster on GPU.
         "sparse_format": os.environ.get("IKGR_SPARSE", rb.get("sparse_format", "coo")).lower(),
+        # Users per full-sort evaluation batch (validation + test). RecBole's eval_batch_size counts
+        # user x item pairs, so its default 4096 is ONE user per batch on MovieLens (15,786 items) and the
+        # TO validation took ~10 min. Scores do not depend on the batch except for float summation order
+        # (a few near-tied top-30 lists flip); it is part of the protocol so runs that differ never merge.
+        "eval_batch_users": int(os.environ.get("IKGR_EVAL_USERS", rb.get("eval_batch_users", 1))),
     }
 
 
@@ -225,6 +230,14 @@ def _float_grid_from_env(name, default):
     return values
 
 
+def _apply_eval_batch(config, dataset):
+    """Full-sort evaluation batches of `eval_batch_users` users: RecBole takes eval_batch_size // item_num
+    users per batch, so the size in user x item pairs is set once the item count is known."""
+    users = max(1, int(config["eval_batch_users"] or 1))
+    config["eval_batch_size"] = users * dataset.item_num
+    return users
+
+
 def _lam_tag(lam):
     return str(lam).replace(".", "p")
 
@@ -241,6 +254,7 @@ def _config(rb, paths, extra, seed):
         "embedding_size": rb["embedding_size"], "learning_rate": proto["learning_rate"],
         "reg_weight": proto["reg_weight"],
         "train_batch_size": proto["train_batch_size"], "sparse_format": proto["sparse_format"],
+        "eval_batch_users": proto["eval_batch_users"],
         "dropout_prob": rb.get("dropout", 0.1),
         "data_path": os.path.dirname(paths["inter_file"]),
         "USER_ID_FIELD": "user_id", "ITEM_ID_FIELD": "item_id", "LABEL_FIELD": "rating",
@@ -467,6 +481,7 @@ def _train_and_collect(model_arg, extra, rb, paths, seed, split):
     os.makedirs(cfg_dict["checkpoint_dir"], exist_ok=True)
     config = Config(model=model_arg, dataset=rb["dataset"], config_dict=cfg_dict)
     dataset = create_dataset(config)
+    _apply_eval_batch(config, dataset)
     train_data, valid_data, test_data = data_preparation(config, dataset)
     guard = _check_profile_leakage(paths, guard_extra, train_data, config, split)
     item_pop, user_act = _train_stats(train_data, config)

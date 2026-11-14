@@ -1,4 +1,15 @@
-# TODO — MovieLens 25M k=30 실험 분담 (김진욱 · 유은선, 2026-11-13 밤 기준, 목표: 11/20 리포트)
+# TODO — MovieLens 25M k=30 실험 분담 (김진욱 · 유은선, 2026-11-14 밤 기준, 목표: 11/20 리포트)
+
+> **⚠ 11/14 평가 기준 변경 (v2) — 은선 님이 할 일**
+> 1. 지금 돌고 있는 실행은 다음 `===== <모델> seed=<n> =====` 헤더가 뜰 때 `Ctrl+C`로 멈춘다.
+> 2. `git pull` (team-mate 브랜치).
+> 3. `python scripts/check_meta_kg.py --rebuild` → 두 줄 모두 `eb64bb38a9656e81 OK`가 나와야 한다 (메타 KG 다시 만들기, 1~2분).
+> 4. 아래 커맨드(1단계 → 2단계)를 **처음부터** 다시 실행한다. 예전 결과는 서명이 달라서 자동으로 다시 학습된다
+>    (보관하려면 실행 전에 `run_k30_<SPLIT>/slice_eval_<SPLIT>_result.json`을 다른 이름으로 복사해 둔다).
+>
+> 바뀐 것: ① 평가 배치 128명 (`config.yaml` `eval_batch_users`, 은선 님 실측 TO 검증 513초 → 9.4초) — 실행 서명에 들어가서
+> 이전 설정 결과와는 병합되지 않는다. ② `build_meta_kg.py`가 실행할 때마다 같은 파일을 만든다 (이전에는 장르 번호가
+> 매번 달라져 PC마다 메타 KG가 달랐음). 두 변경 모두 모든 모델·모든 seed에 똑같이 적용된다.
 
 LLM/API 호출(intent 추출)은 **진욱 PC**에서 돌리고, 그동안 **은선 GPU는 intent가 필요 없는 모델 5개**를 먼저 돌린다.
 intent가 필요한 모델 2개는 intent 묶음이 나오는 대로 진욱 GPU가 돌린다 (API 호출은 GPU를 안 써서 동시에 가능).
@@ -24,6 +35,7 @@ intent가 필요한 모델 2개는 intent 묶음이 나오는 대로 진욱 GPU�
 | 인접행렬 | **CSR** (`sparse_format`) | COO와 계산 동일(테스트로 확인), GPU에서 2.9배 빠름 |
 | epoch | 최대 40, 2 epoch마다 검증, 3번 연속 개선 없으면 정지 | Goodreads와 같은 공통 프로토콜 |
 | 차원·학습률 | 64 / 0.001 | 그대로 |
+| 평가 배치 | **128명** (`eval_batch_users`, 11/14 추가) | RecBole 기본값(4096)은 아이템 15,786개보다 작아서 한 번에 1명씩 평가 → TO 검증 1회 약 10분. 128명이면 약 10초, 지표는 소수점 4자리까지 동일(순위가 거의 같은 몇 명의 top-30만 바뀜) |
 
 진욱 PC 실측 (RTX 3060 Ti, TO, `scripts\benchmark_speed.bat`): LightGCN 2048·COO 114분/epoch(40 epoch 76시간) → **8192·CSR 9.8분/epoch(6.5시간)**,
 IKGR_lgcn_dyn_nointent 6.9시간, BPR·IKGR_dyn_nointent 0.1~0.4시간. TO_GLOBAL은 train이 작아서 약 0.8배.
@@ -33,39 +45,39 @@ IKGR_lgcn_dyn_nointent 6.9시간, BPR·IKGR_dyn_nointent 0.1~0.4시간. TO_GLOBA
 | 단계 | TO (유저별 80/10/10) | TO_GLOBAL (전체 70/10/20) |
 |---|---|---|
 | 데이터 준비 (ml-25m, k=30, 이전 레포와 규모 일치) | ✅ 133,684 유저 / 15,785 아이템 / 24,046,865 | ✅ |
-| step1: exact intent (API) | ✅ 11/12 | ⬜ 유저 약 99k |
+| step1: exact intent (API) | ✅ 11/12 | 🔄 11/14 밤 시작 (유저 약 98.7k, 아이템은 TO 결과 재사용) |
 | step2: related intent (API) | ✅ 11/14 15:25 (키 5개 중 2개 소진, 예비 키로 마무리) | ⬜ 약 115k |
 | D: KG pack | ✅ 11/14 15:26 | ⬜ |
-| `data_bundle/` 업로드 | ✅ 11/14 (메타 KG 제외, 아래 ⚠) | ⬜ 11/16~17 (진욱 PC를 계속 돌릴 때) |
+| `data_bundle/` 업로드 | ✅ 11/14 (메타 KG는 각자 `check_meta_kg.py --rebuild`) | ⬜ 11/16~17 (진욱 PC를 계속 돌릴 때) |
 
 ## 사람별 체크리스트
 
 ### 유은선 — intent 없는 모델 5개 (지금 시작)
 | # | 할 일 | 예상 시간 (RTX 3060 Ti 기준) | 상태 |
 |---|---|---|---|
-| 은1 | §0 준비: clone(`team-mate`) → venv → ml-25m 데이터 → 메타 KG (`[scale] MATCH` 확인) | 30분~1시간 | ⬜ |
+| 은1 | §0 준비: clone(`team-mate`) → venv → ml-25m 데이터 → 메타 KG (`[scale] MATCH`, `check_meta_kg.py` OK 확인) | 30분~1시간 | ✅ (v2 후 메타 KG만 다시) |
 | 은2 | (권장) `scripts\benchmark_speed.bat` → 자기 GPU 속도 확인, 결과 표에 기입 | 10~15분 | ⬜ |
 | 은3 | 보정용: `BPR` seed 2020 TO (아래 1단계에 포함됨) → 값 진욱과 비교 | — | ⬜ |
-| 은4 | **1단계 (빠른 MF 모델 3개)**: TO → TO_GLOBAL, seed 2020·2021·2022 | 약 10~20시간 (대부분 평가·로딩) | ⬜ |
+| 은4 | **1단계 (빠른 MF 모델 3개)**: TO → TO_GLOBAL, seed 2020·2021·2022 | 약 4시간 (평가 배치 128명 기준) | ⬜ v2로 다시 |
 | 은5 | 1단계 결과 zip → 진욱 | — | ⬜ |
-| 은6 | **2단계 (그래프 모델 2개)**: `LightGCN`, `IKGR_lgcn_dyn_nointent`, TO | 약 45시간 | ⬜ |
-| 은7 | 2단계 TO_GLOBAL | 약 36시간 | ⬜ |
+| 은6 | **2단계 (그래프 모델 2개)**: `LightGCN`, `IKGR_lgcn_dyn_nointent`, TO | 약 40시간 | ⬜ v2로 다시 |
+| 은7 | 2단계 TO_GLOBAL | 약 32시간 | ⬜ |
 | 은8 | split이 끝날 때마다 결과 zip → 진욱 | — | ⬜ |
 
-합계 약 4일 (GPU가 3060 Ti보다 느리면 더 걸림 → 은2 결과를 보고 진욱과 조정: 예) TO_GLOBAL의 그래프 모델 일부를 진욱 GPU로).
+합계 약 3일 반 (GPU가 3060 Ti보다 느리면 더 걸림 → 은2 결과를 보고 진욱과 조정: 예) TO_GLOBAL의 그래프 모델 일부를 진욱 GPU로).
 첫 LightGCN 실행에서 2 epoch마다 찍히는 `valid ... ndcg@10` 값이 올라가는지 처음 몇 시간 동안 확인해서 진욱에게 공유한다.
 
 ### 김진욱 — API + intent 모델 2개
 | # | 할 일 | 시작 조건 | 상태 |
 |---|---|---|---|
 | 진1 | TO step2 이어서 실행 (`scripts\intent_run_*h.bat`, GPU 안 씀) → 끝나면 D 자동 실행 | 지금 | ✅ 11/14 |
-| 진2 | 보정용 `BPR` seed 2020 TO 한 번 (`--seeds 2020 --specs BPR`) → 은선 값과 비교 | 지금 (메타 KG 있음) | ⬜ |
+| 진2 | 보정용 `BPR` seed 2020 TO 한 번 (`scripts\gpu_TO_bpr_check.bat`, 약 15분) → 은선 값과 비교 | v2 반영 후 | ⬜ |
 | 진3 | `python scripts/pack_data_bundle.py --split TO` → `data_bundle/` 커밋·푸시 | 진1 완료 | ✅ 11/14 (메타 KG 제외) |
-| 진4 | **TO intent 모델**: `IKGR_dyn`, `IKGR_lgcn_dyn` × seed 2020·2021·2022 (API와 동시에) | 진1 완료 + 메타 KG 통일(⚠) | ⬜ 약 27시간 |
-| 진5 | TO_GLOBAL step1 (`scripts\intent_global_step1_7h.bat`, GPU 숨김) | 진1 완료 | ⬜ |
+| 진4 | **TO intent 모델**: `IKGR_dyn`, `IKGR_lgcn_dyn` × seed 2020·2021·2022 (`scripts\gpu_TO_intent.bat`, API와 동시에) | v2 반영 후 | ⬜ 약 27시간 |
+| 진5 | TO_GLOBAL step1 (`scripts\intent_global_step1_14h.bat`, GPU 숨김, 약 14시간) | 진1 완료 | 🔄 11/14 밤 시작 |
 | 진6 | TO_GLOBAL step2 시작은 **낮에**, GPU 학습을 seed 경계에서 잠깐 멈추고 (`scripts\intent_global_run_7h.bat`, 첫 GPU 인코딩 약 15분) → D | 진5 완료 | ⬜ |
 | 진7 | `python scripts/pack_data_bundle.py --split TO_GLOBAL` → 커밋·푸시 | 진6 완료 | ⬜ |
-| 진8 | **TO_GLOBAL intent 모델** × 3 seed | 진6 완료 | ⬜ 약 22시간 |
+| 진8 | **TO_GLOBAL intent 모델** × 3 seed (`scripts\gpu_TO_GLOBAL_intent.bat`) | 진6 완료 | ⬜ 약 22시간 |
 | 진9 | 은선 결과 병합 + 리포트 (아래 "결과 모으기") | 은5·은8 | ⬜ |
 
 ## 0. 준비 (처음 한 번, 은선)
@@ -84,11 +96,9 @@ Linux: `pip install torch==2.3.0 --index-url https://download.pytorch.org/whl/cu
 # https://files.grouplens.org/datasets/movielens/ml-25m.zip 을 받아서 raw\ml-25m\ 에 압축 해제 (ratings.csv, movies.csv)
 python run_pipeline.py --k 30 --split TO --steps 0ATP          # 콘솔에 [scale] MATCH 가 떠야 함 (위 표의 숫자와 동일)
 python run_pipeline.py --k 30 --split TO_GLOBAL --steps P
-python build_meta_kg.py --inter data/kc_k30/ikgr-custom/ikgr-custom.inter --out run_k30_TO/meta_kg_pack.pt
-python build_meta_kg.py --inter data/kc_k30/ikgr-custom/ikgr-custom.inter --out run_k30_TO_GLOBAL/meta_kg_pack.pt
+python scripts/check_meta_kg.py --rebuild                      # 메타 KG (TO, TO_GLOBAL): 두 줄 모두 eb64bb38a9656e81 OK
 ```
-`[scale] MISMATCH`가 뜨면 멈추고 진욱에게 알린다 (데이터가 다르면 결과를 합칠 수 없음).
-나중에 묶음(`python scripts/unpack_data_bundle.py`)으로 메타 KG·provenance를 덮어써도 내용이 같으면 끝난 결과는 그대로 유지된다.
+`[scale] MISMATCH`나 메타 KG `MISMATCH`가 뜨면 멈추고 진욱에게 알린다 (데이터가 다르면 결과를 합칠 수 없음).
 
 **매 실행 전에** (새 터미널마다): `$env:PYTHONIOENCODING = "utf-8"` (bash: `export PYTHONIOENCODING=utf-8`)
 
@@ -139,7 +149,8 @@ python paired_compare.py --run_dir run_k30_TO --split TO --report           # �
 | 김진욱 | RTX 3060 Ti 8GB | 6.5시간 (9.8분/epoch) | 6.9시간 | 0.1시간 | 0.4시간 |
 | 유은선 | | | | | |
 
-평가·데이터 로딩은 별도로 실행 1회당 대략 30분~1시간 더 걸린다 (추정).
+위 숫자는 학습 시간만이다. 평가 배치 128명(v2)이면 검증 1회가 TO 약 10초라 실행 1회당 데이터 로딩 몇 분만 더 든다
+(v2 전에는 1명씩 평가해서 TO 검증 1회 약 10분, 실행 1회당 최대 3시간 넘게 더 걸렸다).
 
 ## 보정값 (BPR seed 2020, TO)
 
@@ -152,16 +163,15 @@ python paired_compare.py --run_dir run_k30_TO --split TO --report           # �
 
 - `data_bundle/movielens_k30_<SPLIT>_bundle.tgz.partNN` (95MB씩 분할) + `.sha256` + `.files.json`, 복원은 `scripts/unpack_data_bundle.py`.
 - TO 묶음 (11/14 업로드): `data/kc_k30/ikgr-custom/ikgr-custom.inter`, 규모 통계, TO 프로필·provenance, `run_k30_TO/kg_pack.pt`.
-  `meta_kg_pack.pt`는 **뺐다** (아래 ⚠). 풀어도 각자 만든 메타 KG는 그대로 남는다.
+  `meta_kg_pack.pt`는 들어 있지 않다 → `python scripts/check_meta_kg.py --rebuild`로 만든다 (누가 만들어도 같은 내용).
 - TO_GLOBAL 묶음: TO_GLOBAL 프로필·provenance, `run_k30_TO_GLOBAL/kg_pack.pt`, `meta_kg_pack.pt` (`.inter`는 TO 묶음과 공통).
 - `interactions_k30.csv`(700MB)는 `.inter`와 같은 내용이고 학습에 안 쓰여서 넣지 않는다.
 - 은선은 intent 모델을 돌리지 않으므로 묶음이 꼭 필요하지는 않다 (참고·검증용).
 
-### ⚠ 메타 KG (`meta_kg_pack.pt`) — 다시 만들거나 덮어쓰지 말 것 (11/14 확인)
+### 메타 KG (`meta_kg_pack.pt`) — 11/14 수정
 
-`build_meta_kg.py`는 실행할 때마다 장르 노드 번호 순서가 달라진다 (아이템을 파이썬 set 순서로 읽음). 그래서 두 PC의
-`meta_kg_pack.pt` 내용이 서로 다르고, 파일을 바꾸면 그 파일을 읽는 `IKGR_dyn_nointent`·`IKGR_lgcn_dyn_nointent`(진욱은
-`IKGR_dyn`·`IKGR_lgcn_dyn`)의 끝난 결과가 서명 불일치로 **처음부터 다시 학습된다**. `BPR`·`LightGCN`·`IKGR_kgoff`는 안 읽어서 무관.
-- 은선: 지금 가진 `run_k30_TO/meta_kg_pack.pt`, `run_k30_TO_GLOBAL/meta_kg_pack.pt`를 그대로 둔다.
-- intent 모델과 intent 없는 모델을 같은 메타 KG로 비교하려고, 진욱이 intent 모델(진4)을 시작하기 전에 어느 파일로 통일할지 정한다.
-
+11/14 전의 `build_meta_kg.py`는 아이템을 파이썬 set 순서로 읽어서 실행할 때마다 장르 노드 번호가 달라졌다. 그래서 PC마다
+메타 KG 내용이 달랐고, 그 파일을 읽는 `IKGR_dyn_nointent`·`IKGR_lgcn_dyn_nointent`·`IKGR_dyn`·`IKGR_lgcn_dyn`의 서명도 달랐다
+(`BPR`·`LightGCN`·`IKGR_kgoff`는 안 읽음). 이제 아이템 id 순서로 읽어서 누가 언제 만들어도 같은 파일이 나온다
+(내용 해시 `eb64bb38a9656e81`, `scripts/check_meta_kg.py`로 확인, `tests/test_meta_kg.py`). 모든 GPU 실행 파일(`scripts\gpu_*.bat`)은
+시작 전에 이 값을 확인하고 다르면 멈춘다.
