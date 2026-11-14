@@ -1,0 +1,51 @@
+{
+ "bundle": "movielens_k30_TO_bundle",
+ "split": "TO",
+ "k": 30,
+ "parts": [
+  "movielens_k30_TO_bundle.tgz.part00",
+  "movielens_k30_TO_bundle.tgz.part01",
+  "movielens_k30_TO_bundle.tgz.part02",
+  "movielens_k30_TO_bundle.tgz.part03",
+  "movielens_k30_TO_bundle.tgz.part04"
+ ],
+ "archive_sha256": "28dc5cc662264af7d33ff0cbc14e219a8cb45ea271f4fa13d03e7ddd474e8b76",
+ "created": "2026-11-14 18:39:09",
+ "files": [
+  {
+   "path": "data/kc_k30/ikgr-custom/ikgr-custom.inter",
+   "bytes": 700373307,
+   "sha256": "6b2bbc6bd5df8a6650ebe520adc2dc678c3b92ed539a0905ec3b4a47b164d936"
+  },
+  {
+   "path": "data/interactions.csv.stats.json",
+   "bytes": 167,
+   "sha256": "ed2b1f79d6b735722065be56175f8ddefd7cedd976c34ee74a95b4b7063f670c"
+  },
+  {
+   "path": "data/kc_k30/interactions_k30.csv.stats.json",
+   "bytes": 169,
+   "sha256": "a77b2dec2d762605843fb12b49cd475b6667994c3b918ac62334a645cdc0da64"
+  },
+  {
+   "path": "data/kc_k30/profiles_k30_TO.csv",
+   "bytes": 89117370,
+   "sha256": "e7ebc5df9cfddda4709bf3444f81e5d68773b2a7929b6c199dc2d4214fa1c72f"
+  },
+  {
+   "path": "data/kc_k30/profile_provenance_k30_TO.csv.gz",
+   "bytes": 68431180,
+   "sha256": "1c9f0602a26c7b5e0f057bc5609604c087cc1a3b4e5ae6ed7b4d9d9377035bc3"
+  },
+  {
+   "path": "data/kc_k30/profile_provenance_k30_TO.csv.gz.meta.json",
+   "bytes": 694,
+   "sha256": "65f03199a7c4a7a4d7c5fba389fb0c05b8071ff528e48d07fdaa4f0a26e86370"
+  },
+  {
+   "path": "run_k30_TO/kg_pack.pt",
+   "bytes": 284971802,
+   "sha256": "3e6544adea4f725a9bae450ea7ace639840cc5185c60abf57664cdaaf19f591e"
+  }
+ ]
+}

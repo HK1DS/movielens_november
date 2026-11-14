@@ -34,9 +34,9 @@ IKGR_lgcn_dyn_nointent 6.9시간, BPR·IKGR_dyn_nointent 0.1~0.4시간. TO_GLOBA
 |---|---|---|
 | 데이터 준비 (ml-25m, k=30, 이전 레포와 규모 일치) | ✅ 133,684 유저 / 15,785 아이템 / 24,046,865 | ✅ |
 | step1: exact intent (API) | ✅ 11/12 | ⬜ 유저 약 99k |
-| step2: related intent (API) | 🔄 11/13 19:45 기준 약 102k 남음 (키 #1 크레딧 소진 → 키 보충 후 11/14~15 완료 예상) | ⬜ 약 115k |
-| D: KG pack | ⬜ step2 직후 | ⬜ |
-| `data_bundle/` 업로드 | ⬜ 11/14~15 | ⬜ 11/16~17 (진욱 PC를 계속 돌릴 때) |
+| step2: related intent (API) | ✅ 11/14 15:25 (키 5개 중 2개 소진, 예비 키로 마무리) | ⬜ 약 115k |
+| D: KG pack | ✅ 11/14 15:26 | ⬜ |
+| `data_bundle/` 업로드 | ✅ 11/14 (메타 KG 제외, 아래 ⚠) | ⬜ 11/16~17 (진욱 PC를 계속 돌릴 때) |
 
 ## 사람별 체크리스트
 
@@ -58,10 +58,10 @@ IKGR_lgcn_dyn_nointent 6.9시간, BPR·IKGR_dyn_nointent 0.1~0.4시간. TO_GLOBA
 ### 김진욱 — API + intent 모델 2개
 | # | 할 일 | 시작 조건 | 상태 |
 |---|---|---|---|
-| 진1 | TO step2 이어서 실행 (`scripts\intent_run_*h.bat`, GPU 안 씀) → 끝나면 D 자동 실행 | 지금 | 🔄 |
+| 진1 | TO step2 이어서 실행 (`scripts\intent_run_*h.bat`, GPU 안 씀) → 끝나면 D 자동 실행 | 지금 | ✅ 11/14 |
 | 진2 | 보정용 `BPR` seed 2020 TO 한 번 (`--seeds 2020 --specs BPR`) → 은선 값과 비교 | 지금 (메타 KG 있음) | ⬜ |
-| 진3 | `python scripts/pack_data_bundle.py --split TO` → `data_bundle/` 커밋·푸시 | 진1 완료 | ⬜ |
-| 진4 | **TO intent 모델**: `IKGR_dyn`, `IKGR_lgcn_dyn` × seed 2020·2021·2022 (API와 동시에) | 진1 완료 | ⬜ 약 27시간 |
+| 진3 | `python scripts/pack_data_bundle.py --split TO` → `data_bundle/` 커밋·푸시 | 진1 완료 | ✅ 11/14 (메타 KG 제외) |
+| 진4 | **TO intent 모델**: `IKGR_dyn`, `IKGR_lgcn_dyn` × seed 2020·2021·2022 (API와 동시에) | 진1 완료 + 메타 KG 통일(⚠) | ⬜ 약 27시간 |
 | 진5 | TO_GLOBAL step1 (`scripts\intent_global_step1_7h.bat`, GPU 숨김) | 진1 완료 | ⬜ |
 | 진6 | TO_GLOBAL step2 시작은 **낮에**, GPU 학습을 seed 경계에서 잠깐 멈추고 (`scripts\intent_global_run_7h.bat`, 첫 GPU 인코딩 약 15분) → D | 진5 완료 | ⬜ |
 | 진7 | `python scripts/pack_data_bundle.py --split TO_GLOBAL` → 커밋·푸시 | 진6 완료 | ⬜ |
@@ -151,7 +151,17 @@ python paired_compare.py --run_dir run_k30_TO --split TO --report           # �
 ## 참고: 데이터 묶음 (Goodreads와 같은 방식)
 
 - `data_bundle/movielens_k30_<SPLIT>_bundle.tgz.partNN` (95MB씩 분할) + `.sha256` + `.files.json`, 복원은 `scripts/unpack_data_bundle.py`.
-- TO 묶음: `data/kc_k30/ikgr-custom/ikgr-custom.inter`, 규모 통계, TO 프로필·provenance, `run_k30_TO/kg_pack.pt`, `meta_kg_pack.pt`.
+- TO 묶음 (11/14 업로드): `data/kc_k30/ikgr-custom/ikgr-custom.inter`, 규모 통계, TO 프로필·provenance, `run_k30_TO/kg_pack.pt`.
+  `meta_kg_pack.pt`는 **뺐다** (아래 ⚠). 풀어도 각자 만든 메타 KG는 그대로 남는다.
 - TO_GLOBAL 묶음: TO_GLOBAL 프로필·provenance, `run_k30_TO_GLOBAL/kg_pack.pt`, `meta_kg_pack.pt` (`.inter`는 TO 묶음과 공통).
 - `interactions_k30.csv`(700MB)는 `.inter`와 같은 내용이고 학습에 안 쓰여서 넣지 않는다.
 - 은선은 intent 모델을 돌리지 않으므로 묶음이 꼭 필요하지는 않다 (참고·검증용).
+
+### ⚠ 메타 KG (`meta_kg_pack.pt`) — 다시 만들거나 덮어쓰지 말 것 (11/14 확인)
+
+`build_meta_kg.py`는 실행할 때마다 장르 노드 번호 순서가 달라진다 (아이템을 파이썬 set 순서로 읽음). 그래서 두 PC의
+`meta_kg_pack.pt` 내용이 서로 다르고, 파일을 바꾸면 그 파일을 읽는 `IKGR_dyn_nointent`·`IKGR_lgcn_dyn_nointent`(진욱은
+`IKGR_dyn`·`IKGR_lgcn_dyn`)의 끝난 결과가 서명 불일치로 **처음부터 다시 학습된다**. `BPR`·`LightGCN`·`IKGR_kgoff`는 안 읽어서 무관.
+- 은선: 지금 가진 `run_k30_TO/meta_kg_pack.pt`, `run_k30_TO_GLOBAL/meta_kg_pack.pt`를 그대로 둔다.
+- intent 모델과 intent 없는 모델을 같은 메타 KG로 비교하려고, 진욱이 intent 모델(진4)을 시작하기 전에 어느 파일로 통일할지 정한다.
+
