@@ -53,3 +53,9 @@
 - 2026-11-13: 키 #1 크레딧 소진(19:20, 21,395회 성공 후). 남은 두 키가 10초 간격에 묶여 초당 0.2회로 떨어짐 — 간격 완화가 성공
   200회 기준이라 느린 키는 몇 시간씩 못 풀렸음 → 429 없이 60초 지나도 한 단계 완화(`IKGR_LLM_PACE_RECOVER_SECONDS`), 키 2개로 초당 약 2.2회 회복.
   **예비 키**: 동시 호출은 앞쪽 3개(`IKGR_LLM_ACTIVE_KEYS`), `LUXIA_API_KEY_4`/`_5`는 대기하다가 소진된 키 자리를 이어받음.
+- 2026-11-14: TO step2·D 완료, TO 묶음 업로드. **평가 기준 v2** — ① 평가 배치 128명(`eval_batch_users`, 프로토콜·서명 포함):
+  RecBole `eval_batch_size`는 유저×아이템 수라 기본 4096이면 1명씩 평가되어 TO 검증 1회 약 10분(은선 실측 513초 → 9.4초,
+  지표 소수점 4자리 동일). 이전 GPU 시간 추정은 검증을 빼고 잰 것이었음. ② `build_meta_kg.py` 결정적 생성(아이템 id 순서; 이전엔
+  set 순서라 빌드마다 장르 번호가 달라 PC 간 서명 불일치) — `scripts/check_meta_kg.py`(해시 `eb64bb38a9656e81`).
+  v2 이전 결과는 모두 다시 학습. GPU 실행 파일 `scripts\gpu_TO_bpr_check.bat`·`gpu_TO_intent.bat`·`gpu_TO_GLOBAL_intent.bat`,
+  밤샘 API `intent_global_step1_14h.bat`.

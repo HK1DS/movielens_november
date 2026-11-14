@@ -26,10 +26,8 @@ llm:
   max_tokens: 2048
 rag:
   encoder: sentence-transformers/all-mpnet-base-v2
-  annoy_trees: 50
   knn_k: 100
   encoding_npy: run_k30_TO_GLOBAL/intents_emb.npy
-  annoy_index: run_k30_TO_GLOBAL/intents.ann
   vocab_json: run_k30_TO_GLOBAL/intent_vocab.json
 recbole:
   model: IKGR
@@ -51,5 +49,8 @@ recbole:
   reg_weight: 1.0e-06
   lambda_mix: 0.1
   embedding_size: 64
+  train_batch_size: 8192
+  sparse_format: csr
+  eval_batch_users: 128
   gcn_layers: 1
   dropout: 0.1
