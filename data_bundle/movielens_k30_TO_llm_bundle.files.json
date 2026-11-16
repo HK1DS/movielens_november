@@ -1,0 +1,32 @@
+{
+ "bundle": "movielens_k30_TO_llm_bundle",
+ "split": "TO",
+ "k": 30,
+ "parts": [
+  "movielens_k30_TO_llm_bundle.tgz.part00"
+ ],
+ "archive_sha256": "bc13b4c145cd88686795fcabee11399151016c4a6188c6c822bc2ef4dd2bcd5b",
+ "created": "2026-11-16 14:17:50",
+ "files": [
+  {
+   "path": "run_k30_TO/step1_intents.csv",
+   "bytes": 132038183,
+   "sha256": "57efbaf4f851720c462d12e2209d1e46abd951be81732d339278b9abe0c875cc"
+  },
+  {
+   "path": "run_k30_TO/step2_related_intents.csv",
+   "bytes": 311014791,
+   "sha256": "2447e46bd4925d1d1f56225491a5c761812739241dace90d72342b48f94e2407"
+  },
+  {
+   "path": "run_k30_TO/intent_vocab.json",
+   "bytes": 2625179,
+   "sha256": "72bea1b040e9c9f6779f6df842329d52a98cbe791fae944be1ce2219aec375b1"
+  },
+  {
+   "path": "run_k30_TO/rag_manifest.json",
+   "bytes": 533,
+   "sha256": "0335dad7f591ef3b66b177e3f5dc13d67f5748a5de9d6fb57c6b47cee87e8601"
+  }
+ ]
+}

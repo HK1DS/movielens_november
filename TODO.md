@@ -53,9 +53,10 @@ IKGR_lgcn_dyn_nointent 6.9시간, BPR·IKGR_dyn_nointent 0.1~0.4시간. TO_GLOBA
 |---|---|---|
 | 데이터 준비 (ml-25m, k=30, 이전 레포와 규모 일치) | ✅ 133,684 유저 / 15,785 아이템 / 24,046,865 | ✅ |
 | step1: exact intent (API) | ✅ 11/12 | ✅ 11/15 16:25 |
-| step2: related intent (API) | ✅ 11/14 15:25 (키 5개 중 2개 소진, 예비 키로 마무리) | 🔄 11/16 오후 완료 예정 |
-| D: KG pack | ✅ 11/14 15:26 | ⬜ step2 직후 자동 |
-| `data_bundle/` 업로드 | ✅ 11/14 (메타 KG는 각자 `check_meta_kg.py --rebuild`) | ⬜ 11/16~17 (진욱 PC를 계속 돌릴 때) |
+| step2: related intent (API) | ✅ 11/14 15:25 (키 5개 중 2개 소진, 예비 키로 마무리) | ✅ 11/16 16:26 |
+| D: KG pack | ✅ 11/14 15:26 | ✅ 11/16 16:27 |
+| `data_bundle/` 업로드 | ✅ 11/14 (메타 KG는 각자 `check_meta_kg.py --rebuild`) | ✅ 11/16 |
+| LLM 출력(intent CSV) 묶음 `*_llm_bundle` | ✅ 11/16 | ✅ 11/16 |
 
 ## 사람별 체크리스트
 
@@ -80,11 +81,11 @@ IKGR_lgcn_dyn_nointent 6.9시간, BPR·IKGR_dyn_nointent 0.1~0.4시간. TO_GLOBA
 | 진1 | TO step2 이어서 실행 (`scripts\intent_run_*h.bat`, GPU 안 씀) → 끝나면 D 자동 실행 | 지금 | ✅ 11/14 |
 | 진2 | 보정용 `BPR` seed 2020 TO 한 번 (`scripts\gpu_TO_bpr_check.bat`, 약 15분) → 은선 값과 비교 | v2 반영 후 | ⬜ |
 | 진3 | `python scripts/pack_data_bundle.py --split TO` → `data_bundle/` 커밋·푸시 | 진1 완료 | ✅ 11/14 (메타 KG 제외) |
-| 진4 | **TO intent 모델**: `IKGR_dyn`, `IKGR_lgcn_dyn` × seed 2020·2021·2022 (`scripts\gpu_TO_intent.bat`, API와 동시에) | v2 반영 후 | 🔄 IKGR_dyn ✅, IKGR_lgcn_dyn 2020 ✅ |
+| 진4 | **TO intent 모델**: `IKGR_dyn`, `IKGR_lgcn_dyn` × seed 2020·2021·2022 (`scripts\gpu_TO_intent.bat`, API와 동시에) | v2 반영 후 | 🔄 IKGR_dyn ✅, IKGR_lgcn_dyn 2020·2021 ✅ (2022는 11/17) |
 | 진5 | TO_GLOBAL step1 (`scripts\intent_global_step1_14h.bat`, GPU 숨김, 약 14시간) | 진1 완료 | ✅ 11/15 |
-| 진6 | TO_GLOBAL step2 시작은 **낮에**, GPU 학습을 **반드시 멈추고** (`scripts\intent_global_run_7h.bat`, 첫 GPU 인코딩 약 15분; 학습과 겹치면 둘 다 40배 느려짐, 11/15 확인) → D | 진5 완료 | 🔄 RAG 완료, 호출 11/16 오후 끝 |
-| 진7 | `python scripts/pack_data_bundle.py --split TO_GLOBAL` → 커밋·푸시 | 진6 완료 | ⬜ |
-| 진8 | TO_GLOBAL 1단계 다시(새 평가 기준) + **TO_GLOBAL intent 모델** × 3 seed (`scripts\gpu_TO_GLOBAL_intent.bat`) | 진6 완료 | ⬜ |
+| 진6 | TO_GLOBAL step2 시작은 **낮에**, GPU 학습을 **반드시 멈추고** (`scripts\intent_global_run_7h.bat`, 첫 GPU 인코딩 약 15분; 학습과 겹치면 둘 다 40배 느려짐, 11/15 확인) → D | 진5 완료 | ✅ 11/16 16:27 |
+| 진7 | `python scripts/pack_data_bundle.py --split TO_GLOBAL` (+ `--llm`으로 intent CSV 묶음) → 커밋·푸시 | 진6 완료 | ✅ 11/16 |
+| 진8 | TO_GLOBAL 1단계 다시(새 평가 기준) + **TO_GLOBAL intent 모델** × 3 seed (`scripts\gpu_TO_GLOBAL_intent.bat`) | 진6 완료 | 🔄 IKGR_dyn_nointent·IKGR_dyn ✅, BPR·IKGR_kgoff 11/17, IKGR_lgcn_dyn 11/18 |
 | 진9 | 은선 결과 병합 + 리포트 (아래 "결과 모으기") | 은5·은8 | ⬜ |
 
 ## 0. 준비 (처음 한 번, 은선)
@@ -171,7 +172,10 @@ python paired_compare.py --run_dir run_k30_TO --split TO --report           # �
 - `data_bundle/movielens_k30_<SPLIT>_bundle.tgz.partNN` (95MB씩 분할) + `.sha256` + `.files.json`, 복원은 `scripts/unpack_data_bundle.py`.
 - TO 묶음 (11/14 업로드): `data/kc_k30/ikgr-custom/ikgr-custom.inter`, 규모 통계, TO 프로필·provenance, `run_k30_TO/kg_pack.pt`.
   `meta_kg_pack.pt`는 들어 있지 않다 → `python scripts/check_meta_kg.py --rebuild`로 만든다 (누가 만들어도 같은 내용).
-- TO_GLOBAL 묶음: TO_GLOBAL 프로필·provenance, `run_k30_TO_GLOBAL/kg_pack.pt`, `meta_kg_pack.pt` (`.inter`는 TO 묶음과 공통).
+- TO_GLOBAL 묶음 (11/16 업로드): TO_GLOBAL 프로필·provenance, `run_k30_TO_GLOBAL/kg_pack.pt`, `meta_kg_pack.pt` (`.inter`는 TO 묶음과 공통).
+- LLM 출력 묶음 (11/16 업로드, 평가에는 필요 없음): `movielens_k30_<SPLIT>_llm_bundle` = `step1_intents.csv`, `step2_related_intents.csv`,
+  `intent_vocab.json`, `rag_manifest.json`. 복원은 `python scripts/unpack_data_bundle.py --llm [--split TO]`.
+- 결과: `run_k30_<SPLIT>/slice_eval_<SPLIT>_result.json`, `per_user_<SPLIT>/` (유저별 지표), `report_<SPLIT>.md` (paired 비교).
 - `interactions_k30.csv`(700MB)는 `.inter`와 같은 내용이고 학습에 안 쓰여서 넣지 않는다.
 - 은선은 intent 모델을 돌리지 않으므로 묶음이 꼭 필요하지는 않다 (참고·검증용).
 

@@ -67,6 +67,27 @@ def test_pack_unpack_roundtrip_in_parts(tmp_path):
     assert rc != 0 and "sha256 mismatch" in out
 
 
+def test_llm_output_bundle_is_separate(tmp_path):
+    src = _repo(tmp_path, "src")
+    llm = {"run_k30_TO/step1_intents.csv": b"profile,intents\n" * 3000,
+           "run_k30_TO/step2_related_intents.csv": b"profile,related\n" * 3000,
+           "run_k30_TO/intent_vocab.json": b'["a","b"]', "run_k30_TO/rag_manifest.json": b"{}"}
+    for rel, data in llm.items():
+        (src / rel).parent.mkdir(parents=True, exist_ok=True)
+        (src / rel).write_bytes(data)
+    rc, out = _run(src, "pack_data_bundle.py", "--split", "TO", "--llm")
+    assert rc == 0, out
+    assert sorted(p.name for p in (src / "data_bundle").glob("*.files.json")) == ["movielens_k30_TO_llm_bundle.files.json"]
+    dst = _repo(tmp_path, "dst")
+    shutil.copytree(src / "data_bundle", dst / "data_bundle")
+    rc, out = _run(dst, "unpack_data_bundle.py", "--split", "TO")
+    assert rc != 0 and "no bundle for split TO" in out                          # E-input unpack ignores it
+    rc, out = _run(dst, "unpack_data_bundle.py", "--llm", "--split", "TO")
+    assert rc == 0, out
+    for rel, data in llm.items():
+        assert (dst / rel).read_bytes() == data
+
+
 def _teammate(base, split, results, files):
     d = base / f"run_k30_{split}"
     (d / f"per_user_{split}").mkdir(parents=True)

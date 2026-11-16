@@ -6,10 +6,15 @@ LLM/API call. Run on the machine that holds the finished D stage, from the repos
 
     python scripts/pack_data_bundle.py --split TO
     python scripts/pack_data_bundle.py --split TO_GLOBAL
+    python scripts/pack_data_bundle.py --split TO --llm     # the raw LLM outputs (intents per profile), see below
 
 Writes data_bundle/movielens_k<K>_<SPLIT>_bundle.tgz.partNN, ...bundle.sha256 (whole archive) and
 ...bundle.files.json (file list with sizes and per-file sha256). Old parts of the same split are replaced.
 interactions_k<K>.csv is left out: it holds the same rows as the RecBole .inter and E does not read it.
+
+--llm packs the paid LLM outputs of the split instead (movielens_k<K>_<SPLIT>_llm_bundle): step1 exact intents and
+step2 related intents per user/item, the intent vocabulary and the frozen-RAG manifest. E does not need them (the
+KG pack is built from them); they document what the API returned. The response caches stay local.
 """
 import argparse
 import glob
@@ -23,6 +28,12 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 99,614,720 bytes per part, like the Goodreads bundle (GitHub rejects files over 100 MB); env override for tests
 PART_BYTES = int(os.environ.get("IKGR_BUNDLE_PART_BYTES", 95 * 1024 * 1024))
+
+
+def llm_files(k, split):
+    r = f"run_k{k}_{split}"
+    return [f"{r}/step1_intents.csv", f"{r}/step2_related_intents.csv", f"{r}/intent_vocab.json",
+            f"{r}/rag_manifest.json"]
 
 
 def bundle_files(k, split):
@@ -83,13 +94,14 @@ def main():
     ap.add_argument("--split", required=True, choices=["TO", "TO_GLOBAL"])
     ap.add_argument("--k", type=int, default=30)
     ap.add_argument("--level", type=int, default=6, help="gzip level")
+    ap.add_argument("--llm", action="store_true", help="pack the LLM outputs (intents) instead of the E inputs")
     args = ap.parse_args()
     os.chdir(ROOT)
-    files = bundle_files(args.k, args.split)
+    files = (llm_files if args.llm else bundle_files)(args.k, args.split)
     missing = [f for f in files if not os.path.exists(f)]
     if missing:
         raise SystemExit(f"[pack] missing (finish the stages first): {missing}")
-    name = f"movielens_k{args.k}_{args.split}_bundle"
+    name = f"movielens_k{args.k}_{args.split}_{'llm_' if args.llm else ''}bundle"
     os.makedirs("data_bundle", exist_ok=True)
     for old in glob.glob(f"data_bundle/{name}.tgz.part*"):
         os.remove(old)
