@@ -28,6 +28,7 @@ Stages (select with --steps, default 0ATPBCDER)
   C  step2  (LLM + RAG)      $$     related intents
   D  build_kg + build_meta_kg free  intent KG pack + metadata KG pack (adapter.meta_relations)
   E  eval_slices             GPU    early-stopped multi-seed evaluation + leakage guard
+                                    (TO_GLOBAL: eval_global_warm.py, validation on warm users)
   R  paired_compare --report free   paired CIs + Pareto table -> report_{SPLIT}.md
 
 Resuming after an interruption: re-run the same command.
@@ -382,7 +383,8 @@ def main():
             eenv["IKGR_POP_RERANK_GRID"] = args.pop_grid
         if args.dump_valid:
             eenv["IKGR_DUMP_VALID"] = "1"
-        sh([PY, "-u", "eval_slices.py"], env=eenv)
+        # TO_GLOBAL: early stopping on users with train history (eval_global_warm.py, 2026-11-16)
+        sh([PY, "-u", "eval_global_warm.py" if split == "TO_GLOBAL" else "eval_slices.py"], env=eenv)
 
     if "R" in steps:
         sh([PY, "paired_compare.py", "--run_dir", run_dir, "--split", split, "--report"], env=env)

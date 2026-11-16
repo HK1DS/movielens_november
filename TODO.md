@@ -1,6 +1,13 @@
 # TODO — MovieLens 25M k=30 실험 분담 (김진욱 · 유은선, 2026-11-14 밤 기준, 목표: 11/20 리포트)
 
-> **⚠ 11/14 평가 기준 변경 (v2) — 은선 님이 할 일**
+> **⚠ 11/16 TO_GLOBAL 평가 변경 — 은선 님은 TO 2단계가 끝난 뒤, TO_GLOBAL 2단계 전에 `git pull`만 하면 됩니다.**
+> TO_GLOBAL 테스트 유저의 88.6%가 학습 기록이 0인 유저라, 조기 종료가 학습이 덜 된(인기순에 가까운) 모델을 골랐습니다
+> (BPR이 첫 검증 2 epoch에서 멈춤). 이제 TO_GLOBAL은 `eval_global_warm.py`로 평가합니다: 검증(조기 종료)은 학습 기록이
+> 있는 유저만, 테스트는 전원(기록 있는/없는 유저로 나눠 보고). `run_pipeline.py --split TO_GLOBAL`이 알아서 씁니다.
+> **TO는 바뀐 것이 없어서 TO 결과는 그대로 유효**합니다(eval_slices.py 수정 없음). TO_GLOBAL 1단계 결과는 이전 기준이라
+> 진욱이 새 기준으로 다시 돌립니다 → 은선 님은 TO_GLOBAL 1단계를 다시 돌리지 않습니다.
+>
+> **11/14 평가 기준 변경 (v2) — 은선 님이 할 일 (완료)**
 > 1. 지금 돌고 있는 실행은 다음 `===== <모델> seed=<n> =====` 헤더가 뜰 때 `Ctrl+C`로 멈춘다.
 > 2. `git pull` (team-mate 브랜치).
 > 3. `python scripts/check_meta_kg.py --rebuild` → 두 줄 모두 `eb64bb38a9656e81 OK`가 나와야 한다 (메타 KG 다시 만들기, 1~2분).
@@ -45,9 +52,9 @@ IKGR_lgcn_dyn_nointent 6.9시간, BPR·IKGR_dyn_nointent 0.1~0.4시간. TO_GLOBA
 | 단계 | TO (유저별 80/10/10) | TO_GLOBAL (전체 70/10/20) |
 |---|---|---|
 | 데이터 준비 (ml-25m, k=30, 이전 레포와 규모 일치) | ✅ 133,684 유저 / 15,785 아이템 / 24,046,865 | ✅ |
-| step1: exact intent (API) | ✅ 11/12 | 🔄 11/14 밤 시작 (유저 약 98.7k, 아이템은 TO 결과 재사용) |
-| step2: related intent (API) | ✅ 11/14 15:25 (키 5개 중 2개 소진, 예비 키로 마무리) | ⬜ 약 115k |
-| D: KG pack | ✅ 11/14 15:26 | ⬜ |
+| step1: exact intent (API) | ✅ 11/12 | ✅ 11/15 16:25 |
+| step2: related intent (API) | ✅ 11/14 15:25 (키 5개 중 2개 소진, 예비 키로 마무리) | 🔄 11/16 오후 완료 예정 |
+| D: KG pack | ✅ 11/14 15:26 | ⬜ step2 직후 자동 |
 | `data_bundle/` 업로드 | ✅ 11/14 (메타 KG는 각자 `check_meta_kg.py --rebuild`) | ⬜ 11/16~17 (진욱 PC를 계속 돌릴 때) |
 
 ## 사람별 체크리스트
@@ -58,10 +65,10 @@ IKGR_lgcn_dyn_nointent 6.9시간, BPR·IKGR_dyn_nointent 0.1~0.4시간. TO_GLOBA
 | 은1 | §0 준비: clone(`team-mate`) → venv → ml-25m 데이터 → 메타 KG (`[scale] MATCH`, `check_meta_kg.py` OK 확인) | 30분~1시간 | ✅ (v2 후 메타 KG만 다시) |
 | 은2 | (권장) `scripts\benchmark_speed.bat` → 자기 GPU 속도 확인, 결과 표에 기입 | 10~15분 | ⬜ |
 | 은3 | 보정용: `BPR` seed 2020 TO (아래 1단계에 포함됨) → 값 진욱과 비교 | — | ⬜ |
-| 은4 | **1단계 (빠른 MF 모델 3개)**: TO → TO_GLOBAL, seed 2020·2021·2022 | 약 4시간 (평가 배치 128명 기준) | ⬜ v2로 다시 |
-| 은5 | 1단계 결과 zip → 진욱 | — | ⬜ |
-| 은6 | **2단계 (그래프 모델 2개)**: `LightGCN`, `IKGR_lgcn_dyn_nointent`, TO | 약 40시간 | ⬜ v2로 다시 |
-| 은7 | 2단계 TO_GLOBAL | 약 32시간 | ⬜ |
+| 은4 | **1단계 (빠른 MF 모델 3개)**: TO → TO_GLOBAL, seed 2020·2021·2022 | 약 4시간 (평가 배치 128명 기준) | ✅ 11/15 (TO 결과 병합 완료. TO_GLOBAL은 11/16 기준 변경으로 진욱이 다시 돌림) |
+| 은5 | 1단계 결과 zip → 진욱 | — | ✅ 11/16 |
+| 은6 | **2단계 (그래프 모델 2개)**: `LightGCN`, `IKGR_lgcn_dyn_nointent`, TO | 약 40시간 (RTX 2070 SUPER는 약 55시간) | 🔄 |
+| 은7 | 2단계 TO_GLOBAL — **시작 전 `git pull`** (TO_GLOBAL 평가 변경 반영) | 약 32시간 | ⬜ (일정은 11/18에 진욱과 조정) |
 | 은8 | split이 끝날 때마다 결과 zip → 진욱 | — | ⬜ |
 
 합계 약 3일 반 (GPU가 3060 Ti보다 느리면 더 걸림 → 은2 결과를 보고 진욱과 조정: 예) TO_GLOBAL의 그래프 모델 일부를 진욱 GPU로).
@@ -73,11 +80,11 @@ IKGR_lgcn_dyn_nointent 6.9시간, BPR·IKGR_dyn_nointent 0.1~0.4시간. TO_GLOBA
 | 진1 | TO step2 이어서 실행 (`scripts\intent_run_*h.bat`, GPU 안 씀) → 끝나면 D 자동 실행 | 지금 | ✅ 11/14 |
 | 진2 | 보정용 `BPR` seed 2020 TO 한 번 (`scripts\gpu_TO_bpr_check.bat`, 약 15분) → 은선 값과 비교 | v2 반영 후 | ⬜ |
 | 진3 | `python scripts/pack_data_bundle.py --split TO` → `data_bundle/` 커밋·푸시 | 진1 완료 | ✅ 11/14 (메타 KG 제외) |
-| 진4 | **TO intent 모델**: `IKGR_dyn`, `IKGR_lgcn_dyn` × seed 2020·2021·2022 (`scripts\gpu_TO_intent.bat`, API와 동시에) | v2 반영 후 | ⬜ 약 27시간 |
-| 진5 | TO_GLOBAL step1 (`scripts\intent_global_step1_14h.bat`, GPU 숨김, 약 14시간) | 진1 완료 | 🔄 11/14 밤 시작 |
-| 진6 | TO_GLOBAL step2 시작은 **낮에**, GPU 학습을 seed 경계에서 잠깐 멈추고 (`scripts\intent_global_run_7h.bat`, 첫 GPU 인코딩 약 15분) → D | 진5 완료 | ⬜ |
+| 진4 | **TO intent 모델**: `IKGR_dyn`, `IKGR_lgcn_dyn` × seed 2020·2021·2022 (`scripts\gpu_TO_intent.bat`, API와 동시에) | v2 반영 후 | 🔄 IKGR_dyn ✅, IKGR_lgcn_dyn 2020 ✅ |
+| 진5 | TO_GLOBAL step1 (`scripts\intent_global_step1_14h.bat`, GPU 숨김, 약 14시간) | 진1 완료 | ✅ 11/15 |
+| 진6 | TO_GLOBAL step2 시작은 **낮에**, GPU 학습을 **반드시 멈추고** (`scripts\intent_global_run_7h.bat`, 첫 GPU 인코딩 약 15분; 학습과 겹치면 둘 다 40배 느려짐, 11/15 확인) → D | 진5 완료 | 🔄 RAG 완료, 호출 11/16 오후 끝 |
 | 진7 | `python scripts/pack_data_bundle.py --split TO_GLOBAL` → 커밋·푸시 | 진6 완료 | ⬜ |
-| 진8 | **TO_GLOBAL intent 모델** × 3 seed (`scripts\gpu_TO_GLOBAL_intent.bat`) | 진6 완료 | ⬜ 약 22시간 |
+| 진8 | TO_GLOBAL 1단계 다시(새 평가 기준) + **TO_GLOBAL intent 모델** × 3 seed (`scripts\gpu_TO_GLOBAL_intent.bat`) | 진6 완료 | ⬜ |
 | 진9 | 은선 결과 병합 + 리포트 (아래 "결과 모으기") | 은5·은8 | ⬜ |
 
 ## 0. 준비 (처음 한 번, 은선)
