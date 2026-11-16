@@ -66,3 +66,6 @@
   골랐음(BPR NDCG@10 0.137, 기록 있는 유저만 보면 IKGR_dyn_nointent 0.2225 > BPR 0.1748). `eval_global_warm.py`: 검증 로더를 학습 기록 있는
   유저로 제한, 테스트는 전원, 서명에 protocol.valid_users=warm + 래퍼 코드 해시. eval_slices.py는 그대로라 TO 결과 유지
   (`tests/test_eval_global_warm.py`). 이전 레포는 같은 분할에 eval_step 5·12 epoch라 2 epoch에서 멈출 수 없었음.
+- 2026-11-16: TO_GLOBAL step2·D 완료(API 작업 전부 끝, 키 #7 미사용). TO_GLOBAL 평가 묶음 + LLM 출력 묶음(`pack_data_bundle.py --llm`,
+  step1/step2 intent CSV·어휘·RAG manifest; E 입력 묶음과 이름으로 구분) 업로드. 결과 JSON·유저별 파일·`report_<SPLIT>.md` 커밋
+  (TO_GLOBAL은 새 평가 기준 결과만; 이전 기준 BPR/IKGR_kgoff는 다시 학습).

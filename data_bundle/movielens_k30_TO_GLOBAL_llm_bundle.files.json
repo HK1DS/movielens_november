@@ -1,0 +1,32 @@
+{
+ "bundle": "movielens_k30_TO_GLOBAL_llm_bundle",
+ "split": "TO_GLOBAL",
+ "k": 30,
+ "parts": [
+  "movielens_k30_TO_GLOBAL_llm_bundle.tgz.part00"
+ ],
+ "archive_sha256": "66ef3f8f1de95f8f439553cc6381d76497524119f938ef25590ef93f9b9f189f",
+ "created": "2026-11-16 14:18:11",
+ "files": [
+  {
+   "path": "run_k30_TO_GLOBAL/step1_intents.csv",
+   "bytes": 103301915,
+   "sha256": "ed7a5b6d5300527c05609a7f9da7cc2fb342d1a5b0083d8147895a8ac92196ab"
+  },
+  {
+   "path": "run_k30_TO_GLOBAL/step2_related_intents.csv",
+   "bytes": 254699050,
+   "sha256": "c719d5db1b3dbc05549b06e90c5bce93075108b2c8b032b525b945d3ef3a0a22"
+  },
+  {
+   "path": "run_k30_TO_GLOBAL/intent_vocab.json",
+   "bytes": 2217371,
+   "sha256": "76c23782c4c61db636228e059211fbe19f09fe04e21c5ef69bac0fa4dd02de7b"
+  },
+  {
+   "path": "run_k30_TO_GLOBAL/rag_manifest.json",
+   "bytes": 533,
+   "sha256": "61b0d6521ed50246c5698fc303af0ea753308c6361c0d01975d82de750b263c1"
+  }
+ ]
+}

@@ -9,6 +9,7 @@ Usage (from the repository root):
     python scripts/unpack_data_bundle.py                 # every bundle present: verify sha256, then extract
     python scripts/unpack_data_bundle.py --split TO      # one split
     python scripts/unpack_data_bundle.py --check         # verify only
+    python scripts/unpack_data_bundle.py --llm           # the LLM-output bundles (*_llm_bundle) instead
 """
 import argparse
 import glob
@@ -98,8 +99,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--split", default="all", help="TO, TO_GLOBAL or all")
     ap.add_argument("--check", action="store_true", help="verify only, do not extract")
+    ap.add_argument("--llm", action="store_true", help="the LLM-output bundles (intents), not the E inputs")
     args = ap.parse_args()
-    names = [n for n in bundles() if args.split == "all" or n.endswith(f"_{args.split}_bundle")]
+    suffix = "_llm_bundle" if args.llm else "_bundle"
+    names = [n for n in bundles() if (n.endswith("_llm_bundle") == args.llm)
+             and (args.split == "all" or n.endswith(f"_{args.split}{suffix}"))]
     if not names:
         raise SystemExit(f"no bundle for split {args.split} in {BUNDLE_DIR}")
     for name in names:

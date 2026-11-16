@@ -245,7 +245,7 @@ LLM 단계는 API PC 한 대에서 돌리고, 팀원은 E 단계만 seed를 나�
 | 스크립트 | 누가 | 하는 일 |
 |---|---|---|
 | `scripts/pack_data_bundle.py --split TO` | API PC (D 끝난 뒤) | 평가 입력(TO는 공용 `.inter` 포함, 프로필·provenance, `kg_pack.pt`, `meta_kg_pack.pt`)을 `data_bundle/`에 95MB 분할 tgz + sha256 + 파일 목록으로 묶음. git으로 전달 (Goodreads와 같은 방식). `interactions_k30.csv`는 `.inter`와 같은 내용이라 제외 |
-| `scripts/unpack_data_bundle.py` | 팀원 | sha256 확인 후 복원 (`--split TO`, `--check`) |
+| `scripts/unpack_data_bundle.py` | 팀원 | sha256 확인 후 복원 (`--split TO`, `--check`; `--llm`이면 LLM 출력 묶음 = intent CSV) |
 | `scripts/merge_results.py --split TO --inputs a.zip b_dir ...` | 결과 모으는 사람 | 팀원별 `slice_eval_<SPLIT>_result.json` + `per_user_<SPLIT>/`(폴더 또는 zip)를 합침. `run_signature`가 다르면(다른 코드·데이터·프로토콜로 평가) 합치지 않고 이유를 출력 |
 
 **학습 설정 (2026-11-13):** 모든 spec 공통으로 배치 8192, LightGCN 인접행렬 CSR(`config.yaml`의 `train_batch_size`, `sparse_format`;

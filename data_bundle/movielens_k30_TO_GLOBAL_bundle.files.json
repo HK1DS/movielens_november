@@ -1,0 +1,39 @@
+{
+ "bundle": "movielens_k30_TO_GLOBAL_bundle",
+ "split": "TO_GLOBAL",
+ "k": 30,
+ "parts": [
+  "movielens_k30_TO_GLOBAL_bundle.tgz.part00",
+  "movielens_k30_TO_GLOBAL_bundle.tgz.part01",
+  "movielens_k30_TO_GLOBAL_bundle.tgz.part02"
+ ],
+ "archive_sha256": "3dca0a691593d20eda58a07e8b536149644b7214be5eac2a21eccffe67fa5fb4",
+ "created": "2026-11-16 14:17:19",
+ "files": [
+  {
+   "path": "data/kc_k30/profiles_k30_TO_GLOBAL.csv",
+   "bytes": 68282113,
+   "sha256": "61b12fb197421672ee8c91f3f76c8433f31b1079a3201f8193b526af7f02f467"
+  },
+  {
+   "path": "data/kc_k30/profile_provenance_k30_TO_GLOBAL.csv.gz",
+   "bytes": 60050684,
+   "sha256": "c75153ed8537e3f3e12d0a2ad8ffcf20675a8cfdad2d87e4c667d443dde9bdc1"
+  },
+  {
+   "path": "data/kc_k30/profile_provenance_k30_TO_GLOBAL.csv.gz.meta.json",
+   "bytes": 703,
+   "sha256": "5db0932ff88e3d0258553c4c82144578b5e8aad17f1dc27a59458216f04a87df"
+  },
+  {
+   "path": "run_k30_TO_GLOBAL/kg_pack.pt",
+   "bytes": 237053872,
+   "sha256": "96679064201734046f09a127a368ecc59f98c998f85ed62a8632ef1eec0170d7"
+  },
+  {
+   "path": "run_k30_TO_GLOBAL/meta_kg_pack.pt",
+   "bytes": 4488091,
+   "sha256": "a11f835518d848ffef0c409bf91ba7db8c7393dc694a1d4c1b645185e7cdd8e1"
+  }
+ ]
+}
