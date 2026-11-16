@@ -263,6 +263,10 @@ RecBole의 `eval_batch_size`는 유저×아이템 수라 기본값 4096이면 Mo
 점수가 거의 같은 몇 명의 top-30 순서만 바뀐다(`tests/test_eval_batch.py`). 프로토콜(실행 서명)에 들어가므로 다른 값으로 돌린 결과와는 병합되지 않는다.
 메타 KG는 `build_meta_kg.py`가 아이템 id 순서로 만들어 누가 만들어도 같은 내용이다(`scripts/check_meta_kg.py`).
 
+**TO_GLOBAL 검증 (2026-11-16):** 전역 시간 분할이라 TO_GLOBAL 테스트 유저의 88.6%가 학습 기록이 0이다. 이 유저들은 개인화가 불가능해서
+검증 점수가 인기순에 가까운(덜 학습된) 모델을 골랐다. `run_pipeline.py --split TO_GLOBAL`은 `eval_global_warm.py`로 평가한다:
+조기 종료용 검증은 학습 기록이 있는 유저만, 테스트는 전원(사용자별 파일의 `activity_train`으로 기록 있는/없는 유저를 나눠 보고).
+
 평가 서명(`eval_slices.py`, schema 4)은 기계와 무관하다: spec이 실제로 읽는 데이터 파일만(intent spec: provenance + `kg_pack.pt`,
 메타 KG spec: `meta_kg_pack.pt`), 그 **내용**으로 해시하고(.gz는 압축 해제 후, .pt는 텐서 값), 코드는 줄바꿈을 정규화해서,
 경로는 레포 기준 상대경로로 기록한다. 그래서 intent 없는 spec 결과는 나중에 `kg_pack.pt`가 생겨도 무효화되지 않고,

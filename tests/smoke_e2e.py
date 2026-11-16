@@ -26,7 +26,7 @@ from make_synthetic_data import dataset_section  # noqa: E402
 
 CODE = ["prepare_interactions.py", "apply_k_core.py", "make_temporal_inter.py",
         "build_trainonly_profiles.py", "estimate_llm_cost.py", "step1.py", "step2.py",
-        "build_kg.py", "build_meta_kg.py", "eval_slices.py",
+        "build_kg.py", "build_meta_kg.py", "eval_slices.py", "eval_global_warm.py",
         "paired_compare.py", "run_pipeline.py", "config.yaml"]
 
 

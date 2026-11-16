@@ -15,6 +15,9 @@
 8. LightGCN shim(`eval_slices.py` 상단 `dok_matrix._update`)은 SciPy ≥ 1.13에서 인접행렬이 비는 버그 수정이다. 지우지 않는다
    (`tests/test_lgcn_backbone.py`).
 
+9. **TO_GLOBAL은 `eval_global_warm.py`로 평가한다** (검증은 학습 기록 있는 유저만). `eval_slices.py`를 고치면 모든 spec의
+   코드 해시가 바뀌어 끝난 결과가 다시 학습되므로, 실험 도중에는 split 하나만 바꾸는 변경을 별도 파일(래퍼)로 한다.
+
 ## 변경 후 확인
 - `python -m pytest -q tests/`
 - 파이프라인 단계나 어댑터 계약을 건드렸으면 `python tests/smoke_e2e.py --workdir <tmp>`
@@ -59,3 +62,7 @@
   set 순서라 빌드마다 장르 번호가 달라 PC 간 서명 불일치) — `scripts/check_meta_kg.py`(해시 `eb64bb38a9656e81`).
   v2 이전 결과는 모두 다시 학습. GPU 실행 파일 `scripts\gpu_TO_bpr_check.bat`·`gpu_TO_intent.bat`·`gpu_TO_GLOBAL_intent.bat`,
   밤샘 API `intent_global_step1_14h.bat`.
+- 2026-11-16: TO_GLOBAL 평가 변경 — 테스트 유저 27,854명 중 88.6%가 학습 기록 0(전역 시간 분할)이라 조기 종료가 2 epoch 모델(인기순에 가까움)을
+  골랐음(BPR NDCG@10 0.137, 기록 있는 유저만 보면 IKGR_dyn_nointent 0.2225 > BPR 0.1748). `eval_global_warm.py`: 검증 로더를 학습 기록 있는
+  유저로 제한, 테스트는 전원, 서명에 protocol.valid_users=warm + 래퍼 코드 해시. eval_slices.py는 그대로라 TO 결과 유지
+  (`tests/test_eval_global_warm.py`). 이전 레포는 같은 분할에 eval_step 5·12 epoch라 2 epoch에서 멈출 수 없었음.
