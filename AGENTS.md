@@ -69,3 +69,7 @@
 - 2026-11-16: TO_GLOBAL step2·D 완료(API 작업 전부 끝, 키 #7 미사용). TO_GLOBAL 평가 묶음 + LLM 출력 묶음(`pack_data_bundle.py --llm`,
   step1/step2 intent CSV·어휘·RAG manifest; E 입력 묶음과 이름으로 구분) 업로드. 결과 JSON·유저별 파일·`report_<SPLIT>.md` 커밋
   (TO_GLOBAL은 새 평가 기준 결과만; 이전 기준 BPR/IKGR_kgoff는 다시 학습).
+- 2026-11-18: 은선 2단계(`LightGCN`, `IKGR_lgcn_dyn_nointent`, TO·TO_GLOBAL × 3 seed) 병합(서명 일치), TO `IKGR_lgcn_dyn` seed 2022 완료 → TO 전부 끝.
+  `RESULTS.md` 작성. `paired_compare.py --min_activity N`(warm 유저만, `report_<SPLIT>_warm.md`; `tests/test_paired_compare.py`).
+  11/17 TO_GLOBAL `IKGR_lgcn_dyn` seed 2020이 3.5시간째 PC 멈춤으로 유실(시드 단위 저장이라 끝난 결과는 무사) → 11/18 저녁 재실행,
+  seed 2021·2022는 `additional` 브랜치로 은선 서버에 요청.
