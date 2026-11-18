@@ -16,7 +16,7 @@
 ---
 
 
-> **결과 요약 (11/18): [RESULTS.md](RESULTS.md)** — TO 완료, TO_GLOBAL은 `IKGR_lgcn_dyn` seed 2021·2022만 남음. TO_GLOBAL은 warm 유저(학습 기록 있는 3,186명) 기준으로 비교한다
+> **결과 요약 (11/18): [RESULTS.md](RESULTS.md)** — 실험 완료(TO·TO_GLOBAL × 7개 spec × 3 seed). TO_GLOBAL은 warm 유저(학습 기록 있는 3,186명) 기준으로 비교한다
 > (`python paired_compare.py --run_dir run_k30_TO_GLOBAL --split TO_GLOBAL --report --min_activity 1`).
 
 ## 1. 아키텍처 한눈에
