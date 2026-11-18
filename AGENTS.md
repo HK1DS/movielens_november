@@ -73,3 +73,4 @@
   `RESULTS.md` 작성. `paired_compare.py --min_activity N`(warm 유저만, `report_<SPLIT>_warm.md`; `tests/test_paired_compare.py`).
   11/17 TO_GLOBAL `IKGR_lgcn_dyn` seed 2020이 3.5시간째 PC 멈춤으로 유실(시드 단위 저장이라 끝난 결과는 무사) → 11/18 저녁 재실행,
   seed 2021·2022는 `additional` 브랜치로 은선 서버에 요청.
+- 2026-11-18 밤: TO_GLOBAL `IKGR_lgcn_dyn` seed 2020(진욱) + 2021·2022(은선 RTX 3090, 서명 동일) 병합 → 두 split 모두 7개 spec × 3 seed 완료. `RESULTS.md` 최종.
