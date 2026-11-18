@@ -14,6 +14,8 @@ Unit = user (metric averaged over seeds first). CI = 95% bootstrap over users; p
 | IKGR_dyn vs IKGR_dyn_nointent | tail_recall@10 | 3,059 | 0.0008 | 0.0006 | +0.0002 (+35.5%) | [+0.0000, +0.0005] | 0.071 | 4/93/2 |
 | IKGR_lgcn_dyn_nointent vs LightGCN | ndcg@10 | 3,186 | 0.2245 | 0.2173 | +0.0072 (+3.3%) | [+0.0042, +0.0102] | 2.2e-08 | 38/31/30 |
 | IKGR_lgcn_dyn_nointent vs LightGCN | tail_recall@10 | 3,059 | 0.0004 | 0.0003 | +0.0001 (+48.6%) | [+0.0001, +0.0002] | 0.031 | 3/96/1 |
+| IKGR_lgcn_dyn vs IKGR_lgcn_dyn_nointent | ndcg@10 | 3,186 | 0.2253 | 0.2245 | +0.0008 (+0.3%) | [-0.0013, +0.0028] | 0.59 | 32/35/33 |
+| IKGR_lgcn_dyn vs IKGR_lgcn_dyn_nointent | tail_recall@10 | 3,059 | 0.0004 | 0.0004 | -0.0000 (-6.4%) | [-0.0001, +0.0001] | 0.7 | 1/97/2 |
 | IKGR_lgcn_dyn_nointent vs IKGR_dyn_nointent | ndcg@10 | 3,186 | 0.2245 | 0.2231 | +0.0014 (+0.6%) | [-0.0009, +0.0036] | 0.12 | 37/29/35 |
 | IKGR_lgcn_dyn_nointent vs IKGR_dyn_nointent | tail_recall@10 | 3,059 | 0.0004 | 0.0006 | -0.0002 (-31.2%) | [-0.0003, -0.0000] | 0.00017 | 2/93/5 |
 
@@ -117,6 +119,26 @@ Unit = user (metric averaged over seeds first). CI = 95% bootstrap over users; p
 | Q4 | 826 | 612 | +0.0002 | 3 | 1 |
 | Q5 | 5371 | 612 | +0.0002 | 7 | 2 |
 
+**IKGR_lgcn_dyn vs IKGR_lgcn_dyn_nointent — ndcg@10 by train-activity quintile**
+
+| bucket | activity ≤ | users | diff | win % | loss % |
+|---|---:|---:|---:|---:|---:|
+| Q1 | 109 | 640 | +0.0018 | 34 | 35 |
+| Q2 | 250 | 636 | -0.0013 | 29 | 33 |
+| Q3 | 441 | 637 | +0.0020 | 31 | 31 |
+| Q4 | 808 | 636 | -0.0001 | 31 | 34 |
+| Q5 | 5371 | 637 | +0.0014 | 34 | 32 |
+
+**IKGR_lgcn_dyn vs IKGR_lgcn_dyn_nointent — tail_recall@10 by train-activity quintile**
+
+| bucket | activity ≤ | users | diff | win % | loss % |
+|---|---:|---:|---:|---:|---:|
+| Q1 | 114 | 612 | -0.0001 | 0 | 0 |
+| Q2 | 261 | 613 | -0.0001 | 1 | 1 |
+| Q3 | 458 | 610 | +0.0000 | 1 | 1 |
+| Q4 | 826 | 612 | +0.0002 | 2 | 1 |
+| Q5 | 5371 | 612 | -0.0002 | 3 | 4 |
+
 **IKGR_lgcn_dyn_nointent vs IKGR_dyn_nointent — ndcg@10 by train-activity quintile**
 
 | bucket | activity ≤ | users | diff | win % | loss % |
@@ -141,6 +163,7 @@ Unit = user (metric averaged over seeds first). CI = 95% bootstrap over users; p
 
 | result | seeds | users (ndcg@10) | ndcg@10 | tail_recall@10 |
 |---|---:|---:|---:|---:|
+| IKGR_lgcn_dyn | 1 | 3,186 | 0.2253 | 0.0004 |
 | IKGR_dyn | 3 | 3,186 | 0.2246 | 0.0008 |
 | IKGR_lgcn_dyn_nointent | 3 | 3,186 | 0.2245 | 0.0004 |
 | BPR | 3 | 3,186 | 0.2242 | 0.0005 |
