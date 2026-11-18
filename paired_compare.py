@@ -20,6 +20,9 @@ above the curve that a popularity penalty on plain CF already traces.
 Usage
   python paired_compare.py --run_dir run_k30_TO --split TO --a IKGR_dyn --b BPR LightGCN IKGR_dyn_nointent
   python paired_compare.py --run_dir run_k30_TO --split TO --report     # default pairs + Pareto -> markdown
+  python paired_compare.py --run_dir run_k30_TO_GLOBAL --split TO_GLOBAL --report --min_activity 1
+      # users with >= 1 train interaction only -> report_TO_GLOBAL_warm.md (TO_GLOBAL: 88.6% of test users are
+      # cold, so all-user means mostly measure how a model scores untrained user embeddings)
 """
 import argparse
 import glob
@@ -119,6 +122,35 @@ def pareto_rows(result_json):
     return df.sort_values("ndcg@10", ascending=False)
 
 
+def subset_summary(pu_dir, metrics, phase, seeds, min_activity):
+    """Per-result means over the users kept by --min_activity (from the per-user files; the result JSON holds
+    all-user means only). Pop-penalty variants are left out."""
+    names = sorted({re.sub(r"__s\d+__.*$", "", os.path.basename(f))
+                    for f in glob.glob(os.path.join(pu_dir, f"*__{phase}.csv.gz"))})
+    rows = []
+    for name in names:
+        if re.search(r"_pop\d", name):
+            continue
+        vals, n_users, n_seeds = {}, 0, 0
+        for metric in metrics:
+            u, n = load_user_means(pu_dir, name, metric, phase, seeds)
+            if u is None:
+                continue
+            u = u[u["activity_train"] >= min_activity]
+            vals[metric] = float(u["value"].mean())
+            if metric == metrics[0]:
+                n_users, n_seeds = len(u), n
+        if vals:
+            rows.append((name, n_seeds, n_users, vals))
+    rows.sort(key=lambda r: -r[3].get(metrics[0], float("-inf")))
+    out = ["", f"# Per-result means (users with >= {min_activity} train interaction(s), seed means per user)", "",
+           f"| result | seeds | users ({metrics[0]}) | " + " | ".join(metrics) + " |", "|---|---:|---:|" + "---:|" * len(metrics)]
+    for name, n_seeds, n_users, vals in rows:
+        out.append(f"| {name} | {n_seeds} | {n_users:,} | " +
+                   " | ".join(f"{vals[m]:.4f}" if m in vals else "" for m in metrics) + " |")
+    return out
+
+
 def fmt_pair(a, b, metric, r):
     lo, hi = r["ci95"]
     return (f"| {a} vs {b} | {metric} | {r['n_users']:,} | {r['mean_a']:.4f} | {r['mean_b']:.4f} | "
@@ -138,6 +170,8 @@ def main():
     ap.add_argument("--n_boot", type=int, default=10000)
     ap.add_argument("--by_activity", action="store_true")
     ap.add_argument("--report", action="store_true", help="default pairs + Pareto -> <run_dir>/report_<split>.md")
+    ap.add_argument("--min_activity", type=int, default=0,
+                    help="keep users with >= N train interactions (1 = warm users); report -> report_<split>_warm.md")
     args = ap.parse_args()
 
     seeds = {int(s) for s in args.seeds.split(",") if s.strip()} or None
@@ -146,7 +180,8 @@ def main():
     if args.report and not pairs:
         pairs = DEFAULT_PAIRS
 
-    lines = [f"# Paired comparisons ({args.split}, {args.phase})", "",
+    scope = "" if args.min_activity <= 0 else f", users with >= {args.min_activity} train interaction(s)"
+    lines = [f"# Paired comparisons ({args.split}, {args.phase}{scope})", "",
              "Unit = user (metric averaged over seeds first). CI = 95% bootstrap over users; "
              "p = Wilcoxon signed-rank; W/T/L = % users where A wins/ties/loses.", "",
              "| A vs B | metric | users | A | B | diff (rel) | 95% CI | p | W/T/L % |",
@@ -159,6 +194,8 @@ def main():
             if ua is None or ub is None:
                 print(f"[skip] {a} vs {b} ({metric}): per-user files missing")
                 continue
+            if args.min_activity > 0:
+                ua = ua[ua["activity_train"] >= args.min_activity]
             r = paired(ua, ub, args.n_boot)
             if r is None:
                 continue
@@ -175,7 +212,9 @@ def main():
 
     res_json = os.path.join(args.run_dir, "slice_eval_result.json" if args.split == "RS"
                             else f"slice_eval_{args.split}_result.json")
-    if os.path.exists(res_json):
+    if args.min_activity > 0:
+        lines += subset_summary(pu_dir, args.metrics, args.phase, seeds, args.min_activity)
+    elif os.path.exists(res_json):
         df = pareto_rows(res_json)
         if not df.empty:
             lines += ["", f"# Accuracy / exposure Pareto ({args.split}, seed means)", "",
@@ -188,7 +227,8 @@ def main():
                 lines.append(f"| {r['result']} | {r['n_seeds']} | {r['ndcg@10']:.4f} | {r['ndcg_std']:.4f} | "
                              f"{r['tail_recall@10']:.4f} | {r['coverage@10']:.4f} | {be} | {mark} |")
     if args.report:
-        out = os.path.join(args.run_dir, f"report_{args.split}.md")
+        suffix = "" if args.min_activity <= 0 else ("_warm" if args.min_activity == 1 else f"_act{args.min_activity}")
+        out = os.path.join(args.run_dir, f"report_{args.split}{suffix}.md")
         with open(out, "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
         print(f"[report] -> {out}")

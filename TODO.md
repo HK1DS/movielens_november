@@ -1,5 +1,8 @@
 # TODO — MovieLens 25M k=30 실험 분담 (김진욱 · 유은선, 2026-11-14 밤 기준, 목표: 11/20 리포트)
 
+> **11/18 결과 요약: [RESULTS.md](RESULTS.md)** — TO 7개 spec × 3 seed 완료(은선 2단계 병합). TO_GLOBAL은 `IKGR_lgcn_dyn`만 남음
+> (seed 2020 진욱 11/18 저녁, seed 2021·2022 은선 — [`additional` 브랜치](https://github.com/HK1DS/movielens_november/tree/additional)의 `ADDITIONAL.md`).
+
 > **⚠ 11/16 TO_GLOBAL 평가 변경 — 은선 님은 TO 2단계가 끝난 뒤, TO_GLOBAL 2단계 전에 `git pull`만 하면 됩니다.**
 > TO_GLOBAL 테스트 유저의 88.6%가 학습 기록이 0인 유저라, 조기 종료가 학습이 덜 된(인기순에 가까운) 모델을 골랐습니다
 > (BPR이 첫 검증 2 epoch에서 멈춤). 이제 TO_GLOBAL은 `eval_global_warm.py`로 평가합니다: 검증(조기 종료)은 학습 기록이
@@ -68,9 +71,10 @@ IKGR_lgcn_dyn_nointent 6.9시간, BPR·IKGR_dyn_nointent 0.1~0.4시간. TO_GLOBA
 | 은3 | 보정용: `BPR` seed 2020 TO (아래 1단계에 포함됨) → 값 진욱과 비교 | — | ⬜ |
 | 은4 | **1단계 (빠른 MF 모델 3개)**: TO → TO_GLOBAL, seed 2020·2021·2022 | 약 4시간 (평가 배치 128명 기준) | ✅ 11/15 (TO 결과 병합 완료. TO_GLOBAL은 11/16 기준 변경으로 진욱이 다시 돌림) |
 | 은5 | 1단계 결과 zip → 진욱 | — | ✅ 11/16 |
-| 은6 | **2단계 (그래프 모델 2개)**: `LightGCN`, `IKGR_lgcn_dyn_nointent`, TO | 약 40시간 (RTX 2070 SUPER는 약 55시간) | 🔄 |
-| 은7 | 2단계 TO_GLOBAL — **시작 전 `git pull`** (TO_GLOBAL 평가 변경 반영) | 약 32시간 | ⬜ (일정은 11/18에 진욱과 조정) |
-| 은8 | split이 끝날 때마다 결과 zip → 진욱 | — | ⬜ |
+| 은6 | **2단계 (그래프 모델 2개)**: `LightGCN`, `IKGR_lgcn_dyn_nointent`, TO | 약 40시간 (RTX 2070 SUPER는 약 55시간) | ✅ 11/17 (11/18 병합) |
+| 은7 | 2단계 TO_GLOBAL — **시작 전 `git pull`** (TO_GLOBAL 평가 변경 반영) | 약 32시간 | ✅ 11/17, 새 평가 기준 (11/18 병합) |
+| 은8 | split이 끝날 때마다 결과 zip → 진욱 | — | ✅ 11/18 |
+| 은9 | 추가: TO_GLOBAL `IKGR_lgcn_dyn` seed 2021·2022 (`additional` 브랜치, 임대 RTX 3090) | 약 6시간 | ⬜ |
 
 합계 약 3일 반 (GPU가 3060 Ti보다 느리면 더 걸림 → 은2 결과를 보고 진욱과 조정: 예) TO_GLOBAL의 그래프 모델 일부를 진욱 GPU로).
 첫 LightGCN 실행에서 2 epoch마다 찍히는 `valid ... ndcg@10` 값이 올라가는지 처음 몇 시간 동안 확인해서 진욱에게 공유한다.
@@ -81,12 +85,12 @@ IKGR_lgcn_dyn_nointent 6.9시간, BPR·IKGR_dyn_nointent 0.1~0.4시간. TO_GLOBA
 | 진1 | TO step2 이어서 실행 (`scripts\intent_run_*h.bat`, GPU 안 씀) → 끝나면 D 자동 실행 | 지금 | ✅ 11/14 |
 | 진2 | 보정용 `BPR` seed 2020 TO 한 번 (`scripts\gpu_TO_bpr_check.bat`, 약 15분) → 은선 값과 비교 | v2 반영 후 | ⬜ |
 | 진3 | `python scripts/pack_data_bundle.py --split TO` → `data_bundle/` 커밋·푸시 | 진1 완료 | ✅ 11/14 (메타 KG 제외) |
-| 진4 | **TO intent 모델**: `IKGR_dyn`, `IKGR_lgcn_dyn` × seed 2020·2021·2022 (`scripts\gpu_TO_intent.bat`, API와 동시에) | v2 반영 후 | 🔄 IKGR_dyn ✅, IKGR_lgcn_dyn 2020·2021 ✅ (2022는 11/17) |
+| 진4 | **TO intent 모델**: `IKGR_dyn`, `IKGR_lgcn_dyn` × seed 2020·2021·2022 (`scripts\gpu_TO_intent.bat`, API와 동시에) | v2 반영 후 | ✅ 11/18 (IKGR_lgcn_dyn seed 2022 13:25) |
 | 진5 | TO_GLOBAL step1 (`scripts\intent_global_step1_14h.bat`, GPU 숨김, 약 14시간) | 진1 완료 | ✅ 11/15 |
 | 진6 | TO_GLOBAL step2 시작은 **낮에**, GPU 학습을 **반드시 멈추고** (`scripts\intent_global_run_7h.bat`, 첫 GPU 인코딩 약 15분; 학습과 겹치면 둘 다 40배 느려짐, 11/15 확인) → D | 진5 완료 | ✅ 11/16 16:27 |
 | 진7 | `python scripts/pack_data_bundle.py --split TO_GLOBAL` (+ `--llm`으로 intent CSV 묶음) → 커밋·푸시 | 진6 완료 | ✅ 11/16 |
-| 진8 | TO_GLOBAL 1단계 다시(새 평가 기준) + **TO_GLOBAL intent 모델** × 3 seed (`scripts\gpu_TO_GLOBAL_intent.bat`) | 진6 완료 | 🔄 IKGR_dyn_nointent·IKGR_dyn ✅, BPR·IKGR_kgoff 11/17, IKGR_lgcn_dyn 11/18 |
-| 진9 | 은선 결과 병합 + 리포트 (아래 "결과 모으기") | 은5·은8 | ⬜ |
+| 진8 | TO_GLOBAL 1단계 다시(새 평가 기준) + **TO_GLOBAL intent 모델** × 3 seed (`scripts\gpu_TO_GLOBAL_intent.bat`) | 진6 완료 | 🔄 IKGR_dyn_nointent·IKGR_dyn·BPR·IKGR_kgoff ✅, IKGR_lgcn_dyn seed 2020 11/18 저녁 (11/17 PC 멈춤으로 재실행; 2021·2022는 은9) |
+| 진9 | 은선 결과 병합 + 리포트 (아래 "결과 모으기") | 은5·은8 | 🔄 TO 완료, TO_GLOBAL은 IKGR_lgcn_dyn 대기 ([RESULTS.md](RESULTS.md)) |
 
 ## 0. 준비 (처음 한 번, 은선)
 
