@@ -1,7 +1,7 @@
 # TODO — MovieLens 25M k=30 실험 분담 (김진욱 · 유은선, 2026-11-14 밤 기준, 목표: 11/20 리포트)
 
-> **11/18 결과 요약: [RESULTS.md](RESULTS.md)** — TO 7개 spec × 3 seed 완료(은선 2단계 병합). TO_GLOBAL은 `IKGR_lgcn_dyn`만 남음
-> (seed 2020 진욱 11/18 저녁, seed 2021·2022 은선 — [`additional` 브랜치](https://github.com/HK1DS/movielens_november/tree/additional)의 `ADDITIONAL.md`).
+> **11/18 결과 요약: [RESULTS.md](RESULTS.md)** — TO 7개 spec × 3 seed 완료(은선 2단계 병합). TO_GLOBAL은 `IKGR_lgcn_dyn` seed 2021·2022만 남음
+> (seed 2020 진욱 완료, seed 2021·2022 은선 — [`additional` 브랜치](https://github.com/HK1DS/movielens_november/tree/additional)의 `ADDITIONAL.md`).
 
 > **⚠ 11/16 TO_GLOBAL 평가 변경 — 은선 님은 TO 2단계가 끝난 뒤, TO_GLOBAL 2단계 전에 `git pull`만 하면 됩니다.**
 > TO_GLOBAL 테스트 유저의 88.6%가 학습 기록이 0인 유저라, 조기 종료가 학습이 덜 된(인기순에 가까운) 모델을 골랐습니다
@@ -89,7 +89,7 @@ IKGR_lgcn_dyn_nointent 6.9시간, BPR·IKGR_dyn_nointent 0.1~0.4시간. TO_GLOBA
 | 진5 | TO_GLOBAL step1 (`scripts\intent_global_step1_14h.bat`, GPU 숨김, 약 14시간) | 진1 완료 | ✅ 11/15 |
 | 진6 | TO_GLOBAL step2 시작은 **낮에**, GPU 학습을 **반드시 멈추고** (`scripts\intent_global_run_7h.bat`, 첫 GPU 인코딩 약 15분; 학습과 겹치면 둘 다 40배 느려짐, 11/15 확인) → D | 진5 완료 | ✅ 11/16 16:27 |
 | 진7 | `python scripts/pack_data_bundle.py --split TO_GLOBAL` (+ `--llm`으로 intent CSV 묶음) → 커밋·푸시 | 진6 완료 | ✅ 11/16 |
-| 진8 | TO_GLOBAL 1단계 다시(새 평가 기준) + **TO_GLOBAL intent 모델** × 3 seed (`scripts\gpu_TO_GLOBAL_intent.bat`) | 진6 완료 | 🔄 IKGR_dyn_nointent·IKGR_dyn·BPR·IKGR_kgoff ✅, IKGR_lgcn_dyn seed 2020 11/18 저녁 (11/17 PC 멈춤으로 재실행; 2021·2022는 은9) |
+| 진8 | TO_GLOBAL 1단계 다시(새 평가 기준) + **TO_GLOBAL intent 모델** × 3 seed (`scripts\gpu_TO_GLOBAL_intent.bat`) | 진6 완료 | ✅ 진욱 몫 끝 (IKGR_lgcn_dyn seed 2020 11/18 20:50; 11/17 PC 멈춤으로 재실행) — seed 2021·2022는 은9 |
 | 진9 | 은선 결과 병합 + 리포트 (아래 "결과 모으기") | 은5·은8 | 🔄 TO 완료, TO_GLOBAL은 IKGR_lgcn_dyn 대기 ([RESULTS.md](RESULTS.md)) |
 
 ## 0. 준비 (처음 한 번, 은선)
