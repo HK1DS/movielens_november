@@ -16,14 +16,36 @@ Usage (from the repository root):
     python scripts/merge_results.py --split TO --inputs ... --dry_run      # report only
 """
 import argparse
-import io
 import json
 import os
 import shutil
 import sys
 import zipfile
 
+import numpy as np
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def aggregate_seeds(per_seed):
+    """Match eval_slices._aggregate without importing the fingerprinted training module."""
+    keys = [("overall", "ndcg@10"), ("overall", "recall@10"),
+            ("long_tail", "recall@10"), ("long_tail", "recall@30"),
+            ("coverage@10", None), ("novelty_bits", None)]
+    out = {}
+    for grp, sub in keys:
+        vals = []
+        for rep in per_seed.values():
+            v = rep[grp] if sub is None else rep[grp][sub]
+            vals.append(float(v))
+        label = grp if sub is None else f"{grp}.{sub}"
+        out[label] = {"mean": round(float(np.mean(vals)), 4), "std": round(float(np.std(vals, ddof=0)), 4),
+                      "seeds": vals}
+    eps = [rep.get("fit", {}).get("best_epoch") for rep in per_seed.values()]
+    eps = [e for e in eps if e is not None]
+    if eps:
+        out["best_epoch"] = {"mean": round(float(np.mean(eps)), 1), "seeds": eps}
+    return out
 
 
 class Source:
@@ -109,6 +131,9 @@ def main():
                 added += 1
                 copies += [(src, ref, name) for name, ref in src.per_user_files(rname, seed).items()]
         print(f"[merge] {path}: {added} new result x seed entries")
+
+    for entry in merged.values():
+        entry["agg"] = aggregate_seeds(entry["seeds"])
 
     for rname in sorted(merged):
         print(f"  {rname}: seeds {sorted(merged[rname]['seeds'])}")
